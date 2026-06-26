@@ -651,11 +651,12 @@ function parseStationX(text) {
   const action = aMatch[1].toUpperCase().startsWith('V') ? 'SELL' : 'BUY';
   const symbol = aMatch[2].toUpperCase();
   const entry  = parseFloat(aMatch[3]);
-  const tpLine = lines.find(l => /TP\s*1?\s*:\s*([\d.]+)/i.test(l));
+  // Prendre la valeur APRÈS les deux-points (évite d'attraper le "1" de "TP1")
+  const tpLine = lines.find(l => /TP\s*\d*\s*:\s*([\d.]+)/i.test(l));
   const slLine = lines.find(l => /SL\s*:\s*([\d.]+)/i.test(l));
   if (!tpLine || !slLine) return null;
-  const tp = parseFloat(tpLine.match(/([\d.]+)/)[1]);
-  const sl = parseFloat(slLine.match(/([\d.]+)/)[1]);
+  const tp = parseFloat(tpLine.match(/TP\s*\d*\s*:\s*([\d.]+)/i)[1]);
+  const sl = parseFloat(slLine.match(/SL\s*:\s*([\d.]+)/i)[1]);
   return { action, symbol, entry, stopLoss: sl, takeProfit: tp, volume: 1.0 };
 }
 
