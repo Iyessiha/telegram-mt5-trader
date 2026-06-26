@@ -324,7 +324,6 @@ void ProcessSignal(string line)
    {
       ulong ticket = trade.ResultOrder();
       PrintFormat("✅ Exécuté MARCHÉ: %s %s — Ticket #%d", action, symbol, ticket);
-
       // Poser les stops après coup si on les avait différés (et qu'ils sont valides en valeur)
       if(deferStops && (sl > 0 || tp > 0))
       {
@@ -426,7 +425,7 @@ void ProcessSignal(string line)
    {
       ulong ticket = trade.ResultOrder();
       PrintFormat("✅ Ordre placé: %s %s @ %.5f — Ticket #%d", otypeName, symbol, entry, ticket);
-      ConfirmExecution(sigId, ticket);
+      ConfirmExecution(sigId, ticket, "pending");
    }
    else
    {
@@ -439,13 +438,14 @@ void ProcessSignal(string line)
 //+------------------------------------------------------------------+
 //| Confirme l'exécution à l'API (POST)                             |
 //+------------------------------------------------------------------+
-void ConfirmExecution(string sigId, ulong ticket)
+void ConfirmExecution(string sigId, ulong ticket, string state="open")
 {
    string url = InpApiUrl + "/api/ea-poll";
    string json = "{\"key\":\"" + InpSecret + "\",\"id\":\"" + sigId +
                  "\",\"ticket\":" + IntegerToString((long)ticket) +
                  ",\"account\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\"" +
-                 ",\"platform\":\"mt5\"}";
+                 ",\"platform\":\"mt5\"" +
+                 ",\"state\":\"" + state + "\"}";
 
    char   post[];
    char   result[];
@@ -460,11 +460,41 @@ void ConfirmExecution(string sigId, ulong ticket)
 
    if(code == 200)
    {
-      if(InpVerbose) Print("✓ Confirmation envoyée pour signal ", sigId);
+      if(InpVerbose) Print("✓ Confirmation envoyée (", state, ") pour signal ", sigId);
    }
    else
    {
       Print("⚠ Confirmation échouée (code ", code, ", err ", GetLastError(), ")");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Signale un changement d'état d'ordre (filled/cancelled) par ticket|
+//+------------------------------------------------------------------+
+void ReportOrderState(ulong ticket, string state)
+{
+   string url = InpApiUrl + "/api/ea-poll";
+   string json = "{\"key\":\"" + InpSecret + "\"" +
+                 ",\"account\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\"" +
+                 ",\"ticket\":" + IntegerToString((long)ticket) +
+                 ",\"state\":\"" + state + "\"}";
+
+   char   post[];
+   char   result[];
+   string resultHeaders;
+   StringToCharArray(json, post, 0, StringLen(json));
+   ArrayResize(post, StringLen(json));
+
+   string headers = "Content-Type: application/json\r\n";
+   ResetLastError();
+   int code = WebRequest("POST", url, headers, 5000, post, result, resultHeaders);
+   if(code == 200)
+   {
+      if(InpVerbose) Print("✓ État ordre #", ticket, " → ", state);
+   }
+   else
+   {
+      Print("⚠ Report état échoué (code ", code, ", err ", GetLastError(), ")");
    }
 }
 //+------------------------------------------------------------------+
@@ -576,28 +606,54 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeRequest&     request,
                         const MqlTradeResult&      result)
 {
+   // --- Annulation / expiration d'un ordre en attente ---
+   if(trans.type == TRADE_TRANSACTION_ORDER_DELETE)
+   {
+      ulong ord = trans.order;
+      if(ord > 0 && HistoryOrderSelect(ord))
+      {
+         long omagic = HistoryOrderGetInteger(ord, ORDER_MAGIC);
+         long ostate = HistoryOrderGetInteger(ord, ORDER_STATE);
+         if(omagic == InpMagic &&
+            (ostate == ORDER_STATE_CANCELED || ostate == ORDER_STATE_EXPIRED || ostate == ORDER_STATE_REJECTED))
+         {
+            ReportOrderState(ord, "cancelled");
+         }
+      }
+      return;
+   }
+
    if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
 
    ulong dealTicket = trans.deal;
    if(dealTicket <= 0) return;
    if(!HistoryDealSelect(dealTicket)) return;
 
-   // Uniquement les sorties de position (clôtures)
-   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-   if(entry != DEAL_ENTRY_OUT) return;
-
-   // Uniquement nos trades (magic number)
    long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
    if(magic != InpMagic) return;
 
-   ulong  posId  = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-   double price  = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
-   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
-   double swap   = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
-   double comm   = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
-   double net    = profit + swap + comm;
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
 
-   ReportClose(posId, price, net);
+   // --- Entrée en position (ordre exécuté OU pending déclenché) ---
+   if(entry == DEAL_ENTRY_IN)
+   {
+      ulong posId = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+      // Passe la ligne d'exécution de "pending" à "open" (les marchés sont déjà "open")
+      ReportOrderState(posId, "filled");
+      return;
+   }
+
+   // --- Sortie de position (clôture) ---
+   if(entry == DEAL_ENTRY_OUT)
+   {
+      ulong  posId  = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+      double price  = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+      double swap   = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+      double comm   = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+      double net    = profit + swap + comm;
+      ReportClose(posId, price, net);
+   }
 }
 
 //+------------------------------------------------------------------+

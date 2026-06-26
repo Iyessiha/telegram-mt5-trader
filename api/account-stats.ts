@@ -66,6 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           platform: e.platform || null,
           totalTrades: 0,
           openTrades: 0,
+          pendingTrades: 0,
           closedTrades: 0,
           wins: 0,
           losses: 0,
@@ -78,9 +79,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
       const a = byAccount[acc];
+
+      // Ignorer les ordres annulés/expirés (ne comptent pas)
+      if (e.status === 'cancelled') {
+        const when0 = e.closed_at || e.created_at;
+        if (!a.lastActivity || (when0 && when0 > a.lastActivity)) a.lastActivity = when0;
+        return;
+      }
+
       a.totalTrades++;
 
       const isClosed = e.status === 'closed' || e.result;
+      const isPending = e.status === 'pending';
       if (isClosed) {
         a.closedTrades++;
         const p = Number(e.profit) || 0;
@@ -88,6 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (e.result === 'win') { a.wins++; a.grossProfit += p; }
         else if (e.result === 'loss') { a.losses++; a.grossLoss += Math.abs(p); }
         else if (e.result === 'breakeven') { a.breakeven++; }
+      } else if (isPending) {
+        a.pendingTrades++;
       } else {
         a.openTrades++;
       }

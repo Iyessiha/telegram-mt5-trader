@@ -1116,7 +1116,7 @@ function renderAccounts(accounts) {
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <span style="font-size:12px;color:var(--muted)">Profit factor: <b style="color:var(--text)">${pf}</b> · ${a.openTrades} ouvert(s)</span>
+        <span style="font-size:12px;color:var(--muted)">Profit factor: <b style="color:var(--text)">${pf}</b> · ${a.openTrades} ouvert(s)${a.pendingTrades ? ` · <span style="color:var(--yellow)">${a.pendingTrades} en attente</span>` : ''}</span>
         <button class="btn btn-secondary btn-sm" onclick="toggleAccountTrades('${a.accountId}', this)">Détails ▾</button>
       </div>
       <div id="acc-trades-${a.accountId}" style="display:none;margin-top:10px"></div>

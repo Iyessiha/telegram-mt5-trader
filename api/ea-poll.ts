@@ -96,11 +96,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // ---- POST : confirmation d'exécution pour CE compte ----
+  // ---- POST : confirmation d'exécution / changement d'état pour CE compte ----
   if (req.method === 'POST') {
     try {
-      const { id, ticket, account, platform } = req.body || {};
-      if (!id) return res.status(400).send('MISSING_ID');
+      const { id, ticket, account, platform, state } = req.body || {};
+
+      // state possibles:
+      //  - placement marché   -> 'open'      (position active immédiatement)
+      //  - placement pending  -> 'pending'   (ordre en attente, pas déclenché)
+      //  - déclenchement      -> 'filled'    (l'ordre en attente est devenu position) => 'open'
+      //  - annulation/expiry  -> 'cancelled'
+      const isTransition = (state === 'filled' || state === 'cancelled');
+
+      if (!id && !isTransition) return res.status(400).send('MISSING_ID');
+
+      // ----- Transition d'état (déclenchement ou annulation) : update par compte+ticket -----
+      if (isTransition) {
+        if (!account || !ticket) return res.status(400).send('MISSING_ACCOUNT_OR_TICKET');
+        const newStatus = state === 'filled' ? 'open' : 'cancelled';
+        const { error: updErr } = await supabase
+          .from('signal_executions')
+          .update({ status: newStatus })
+          .eq('account_id', String(account))
+          .eq('ticket', Number(ticket));
+        if (updErr) {
+          console.error('ea-poll POST state error:', updErr);
+          return res.status(500).send('ERROR');
+        }
+        return res.status(200).send('OK');
+      }
+
+      // ----- Placement (marché ou pending) : créer la ligne d'exécution -----
+      const placeStatus = state === 'pending' ? 'pending' : 'open';
 
       if (account) {
         const { error: insErr } = await supabase
@@ -111,6 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               account_id: String(account),
               ticket: ticket ? Number(ticket) : null,
               platform: platform ? String(platform) : null,
+              status: placeStatus,
             },
             { onConflict: 'signal_id,account_id', ignoreDuplicates: true }
           );
