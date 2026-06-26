@@ -12,6 +12,13 @@
 CTrade trade;
 
 //--- Paramètres d'entrée
+enum ENUM_ORDER_MODE_X
+{
+   ORDER_MODE_AUTO   = 0,  // AUTO (déduit limite/stop/marché selon l'entrée)
+   ORDER_MODE_MARKET = 1,  // MARCHÉ (exécution immédiate au prix actuel)
+   ORDER_MODE_PENDING= 2   // EN ATTENTE (toujours limite/stop au prix d'entrée)
+};
+
 input string  InpApiUrl      = "https://telegram-mt5-trader.vercel.app"; // URL de base Vercel
 input string  InpSecret      = "VOTRE_SECRET_ICI";  // TELEGRAM_SECRET (identique à Vercel)
 input int     InpPollSeconds = 5;                   // Fréquence de vérification (secondes)
@@ -22,6 +29,11 @@ input string  InpSymbolPrefix = "";                 // Préfixe symbole broker (
 input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (Exness = "c")
 input string  InpAllowedSymbols = "";               // Symboles autorisés (vide = TOUS). Ex: XAUUSD,BTCUSD
 input bool    InpVerbose     = true;                // Journaux détaillés
+
+//--- Type d'ordre (marché / limite / stop)
+input ENUM_ORDER_MODE_X InpOrderMode = ORDER_MODE_AUTO; // Mode d'ordre
+input double  InpEntryTolerance = 50;               // Tolérance (points): entrée≈marché → MARCHÉ
+input int     InpPendingExpiryMin = 0;              // Expiration ordre en attente (min, 0=GTC)
 
 //--- Gestion automatique du SL (Break-Even & Trailing)
 input bool    InpUseBreakEven = true;               // Activer le Break-Even auto
@@ -234,7 +246,33 @@ void ProcessSignal(string line)
 
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
+   entry = NormalizeDouble(entry, digits);
 
+   // ============================================================
+   // DÉCISION: ordre au MARCHÉ ou EN ATTENTE (limite/stop) ?
+   // ============================================================
+   bool useMarket;
+   if(InpOrderMode == ORDER_MODE_MARKET)       useMarket = true;
+   else if(InpOrderMode == ORDER_MODE_PENDING) useMarket = false;
+   else // AUTO
+   {
+      double dist = MathAbs(entry - mktPrice);
+      // entrée absente/nulle, ou très proche du marché → exécution immédiate
+      useMarket = (entry <= 0) || (dist <= InpEntryTolerance * point);
+   }
+
+   // Un ordre en attente trop proche du marché serait rejeté → bascule marché
+   if(!useMarket && MathAbs(entry - mktPrice) < minDist)
+   {
+      if(InpVerbose) Print("ℹ Entrée trop proche du marché → exécution au marché");
+      useMarket = true;
+   }
+
+   // ============================================================
+   // CAS 1 : ORDRE AU MARCHÉ
+   // ============================================================
+   if(useMarket)
+   {
    // Vérifier la cohérence du sens ET la distance minimale, par rapport au PRIX RÉEL
    bool stopsValid = true;
    string why = "";
@@ -285,7 +323,7 @@ void ProcessSignal(string line)
    if(ok)
    {
       ulong ticket = trade.ResultOrder();
-      PrintFormat("✅ Exécuté: %s %s — Ticket #%d", action, symbol, ticket);
+      PrintFormat("✅ Exécuté MARCHÉ: %s %s — Ticket #%d", action, symbol, ticket);
 
       // Poser les stops après coup si on les avait différés (et qu'ils sont valides en valeur)
       if(deferStops && (sl > 0 || tp > 0))
@@ -296,7 +334,6 @@ void ProcessSignal(string line)
             double curPrice = (action == "BUY") ? SymbolInfoDouble(symbol, SYMBOL_BID)
                                                  : SymbolInfoDouble(symbol, SYMBOL_ASK);
             double psl = sl, ptp = tp;
-            bool canSet = true;
             if(action == "BUY")
             {
                if(psl > 0 && (curPrice - psl) < minDist) psl = 0;
@@ -325,9 +362,76 @@ void ProcessSignal(string line)
    }
    else
    {
-      PrintFormat("❌ Échec: %s — Code: %d (%s)",
+      PrintFormat("❌ Échec MARCHÉ: %s — Code: %d (%s)",
                   symbol, trade.ResultRetcode(), trade.ResultRetcodeDescription());
-      // On confirme quand même pour ne pas re-traiter en boucle
+      ConfirmExecution(sigId, 0);
+   }
+   return;
+   } // fin CAS 1 (marché)
+
+   // ============================================================
+   // CAS 2 : ORDRE EN ATTENTE (limite / stop)
+   // ============================================================
+   // Déterminer le type selon le sens et la position de l'entrée
+   ENUM_ORDER_TYPE otype;
+   string otypeName;
+   if(action == "BUY")
+   {
+      if(entry < mktPrice) { otype = ORDER_TYPE_BUY_LIMIT; otypeName = "BUY LIMIT"; }
+      else                 { otype = ORDER_TYPE_BUY_STOP;  otypeName = "BUY STOP";  }
+   }
+   else // SELL
+   {
+      if(entry > mktPrice) { otype = ORDER_TYPE_SELL_LIMIT; otypeName = "SELL LIMIT"; }
+      else                 { otype = ORDER_TYPE_SELL_STOP;  otypeName = "SELL STOP";  }
+   }
+
+   // Valider SL/TP par rapport à l'ENTRÉE (pas au marché)
+   double pSl = sl, pTp = tp;
+   if(action == "BUY")
+   {
+      if(pSl > 0 && (pSl >= entry || (entry - pSl) < minDist)) { Print("⚠ SL pending invalide → retiré"); pSl = 0; }
+      if(pTp > 0 && (pTp <= entry || (pTp - entry) < minDist)) { Print("⚠ TP pending invalide → retiré"); pTp = 0; }
+   }
+   else
+   {
+      if(pSl > 0 && (pSl <= entry || (pSl - entry) < minDist)) { Print("⚠ SL pending invalide → retiré"); pSl = 0; }
+      if(pTp > 0 && (pTp >= entry || (entry - pTp) < minDist)) { Print("⚠ TP pending invalide → retiré"); pTp = 0; }
+   }
+
+   // Expiration éventuelle
+   ENUM_ORDER_TYPE_TIME tt = ORDER_TIME_GTC;
+   datetime expiry = 0;
+   if(InpPendingExpiryMin > 0)
+   {
+      tt = ORDER_TIME_SPECIFIED;
+      expiry = TimeCurrent() + InpPendingExpiryMin * 60;
+   }
+
+   if(InpVerbose)
+      PrintFormat("📌 Ordre %s @ %.5f (SL:%.5f TP:%.5f) marché:%.5f",
+                  otypeName, entry, pSl, pTp, mktPrice);
+
+   bool ok = false;
+   string cmt = "MonWe|" + sigId;
+   switch(otype)
+   {
+      case ORDER_TYPE_BUY_LIMIT:  ok = trade.BuyLimit (volume, entry, symbol, pSl, pTp, tt, expiry, cmt); break;
+      case ORDER_TYPE_BUY_STOP:   ok = trade.BuyStop  (volume, entry, symbol, pSl, pTp, tt, expiry, cmt); break;
+      case ORDER_TYPE_SELL_LIMIT: ok = trade.SellLimit(volume, entry, symbol, pSl, pTp, tt, expiry, cmt); break;
+      case ORDER_TYPE_SELL_STOP:  ok = trade.SellStop (volume, entry, symbol, pSl, pTp, tt, expiry, cmt); break;
+   }
+
+   if(ok)
+   {
+      ulong ticket = trade.ResultOrder();
+      PrintFormat("✅ Ordre placé: %s %s @ %.5f — Ticket #%d", otypeName, symbol, entry, ticket);
+      ConfirmExecution(sigId, ticket);
+   }
+   else
+   {
+      PrintFormat("❌ Échec ordre %s: Code: %d (%s)",
+                  otypeName, trade.ResultRetcode(), trade.ResultRetcodeDescription());
       ConfirmExecution(sigId, 0);
    }
 }
