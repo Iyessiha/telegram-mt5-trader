@@ -1,0 +1,219 @@
+//+------------------------------------------------------------------+
+//|                              MonWe_WebRequest_MT5.mq5             |
+//|                              MonWe Infinity LLC                   |
+//|        Récupère les signaux depuis Vercel via WebRequest         |
+//+------------------------------------------------------------------+
+#property copyright "MonWe Infinity LLC"
+#property link      "https://telegram-mt5-trader.vercel.app"
+#property version   "1.00"
+#property description "Récupère les signaux validés depuis l'API Vercel et les exécute sur MT5"
+
+#include <Trade\Trade.mqh>
+CTrade trade;
+
+//--- Paramètres d'entrée
+input string  InpApiUrl      = "https://telegram-mt5-trader.vercel.app"; // URL de base Vercel
+input string  InpSecret      = "VOTRE_SECRET_ICI";  // TELEGRAM_SECRET (identique à Vercel)
+input int     InpPollSeconds = 5;                   // Fréquence de vérification (secondes)
+input double  InpMaxVolume   = 1.0;                 // Volume max autorisé (sécurité)
+input int     InpSlippage    = 30;                  // Slippage max (points)
+input int     InpMagic       = 20260626;            // Magic number
+input bool    InpVerbose     = true;                // Journaux détaillés
+
+//--- Variables globales
+datetime g_lastPoll = 0;
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+
+   Print("=== MonWe WebRequest EA (MT5) démarré ===");
+   Print("API: ", InpApiUrl);
+   Print("Polling: toutes les ", InpPollSeconds, "s");
+
+   // Vérifier que WebRequest est autorisé
+   Print("⚠ IMPORTANT: Ajoutez cette URL dans:");
+   Print("   Outils → Options → Expert Advisors → Autoriser WebRequest pour:");
+   Print("   ", InpApiUrl);
+
+   EventSetTimer(InpPollSeconds);
+   return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Print("EA arrêté. Raison: ", reason);
+}
+
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   PollSignals();
+}
+
+//+------------------------------------------------------------------+
+//| Interroge l'API Vercel pour les signaux en attente              |
+//+------------------------------------------------------------------+
+void PollSignals()
+{
+   string url = InpApiUrl + "/api/ea-poll?key=" + InpSecret + "&platform=mt5";
+
+   char   post[];
+   char   result[];
+   string headers;
+   string resultHeaders;
+   int    timeout = 5000;
+
+   ResetLastError();
+   int code = WebRequest("GET", url, NULL, NULL, timeout, post, 0, result, resultHeaders);
+
+   if(code == -1)
+   {
+      int err = GetLastError();
+      if(err == 4060)
+      {
+         Print("❌ ERREUR: URL non autorisée. Ajoutez dans Outils → Options → Expert Advisors:");
+         Print("   ", InpApiUrl);
+      }
+      else
+      {
+         Print("❌ WebRequest échoué. Code erreur: ", err);
+      }
+      return;
+   }
+
+   if(code != 200)
+   {
+      if(InpVerbose) Print("Réponse HTTP: ", code);
+      return;
+   }
+
+   string response = CharArrayToString(result);
+   StringTrimRight(response);
+   StringTrimLeft(response);
+
+   if(response == "NONE" || response == "")
+   {
+      // Aucun signal en attente — normal
+      return;
+   }
+
+   if(response == "UNAUTHORIZED")
+   {
+      Print("❌ Secret invalide. Vérifiez InpSecret = TELEGRAM_SECRET");
+      return;
+   }
+
+   // Traiter chaque ligne (un signal par ligne)
+   string lines[];
+   int n = StringSplit(response, '\n', lines);
+   for(int i = 0; i < n; i++)
+   {
+      string line = lines[i];
+      StringTrimRight(line);
+      StringTrimLeft(line);
+      if(StringLen(line) > 0)
+         ProcessSignal(line);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Traite un signal : ID;ACTION;SYMBOL;ENTRY;VOLUME;SL;TP          |
+//+------------------------------------------------------------------+
+void ProcessSignal(string line)
+{
+   string p[];
+   int cnt = StringSplit(line, ';', p);
+   if(cnt < 7)
+   {
+      Print("Signal mal formé: ", line);
+      return;
+   }
+
+   string sigId  = p[0];
+   string action = p[1];
+   string symbol = p[2];
+   double entry  = StringToDouble(p[3]);
+   double volume = StringToDouble(p[4]);
+   double sl     = StringToDouble(p[5]);
+   double tp     = StringToDouble(p[6]);
+
+   // Sécurité volume
+   if(volume > InpMaxVolume)
+   {
+      Print("⚠ Volume ", volume, " > max ", InpMaxVolume, " — plafonné");
+      volume = InpMaxVolume;
+   }
+
+   if(InpVerbose)
+      PrintFormat("📥 Signal: %s %s @ %.5f (SL:%.5f TP:%.5f Vol:%.2f)",
+                  action, symbol, entry, sl, tp, volume);
+
+   // Vérifier que le symbole existe
+   if(!SymbolSelect(symbol, true))
+   {
+      Print("❌ Symbole introuvable: ", symbol);
+      return;
+   }
+
+   // Exécuter au marché
+   bool ok = false;
+   if(action == "BUY")
+      ok = trade.Buy(volume, symbol, 0.0, sl, tp, "MonWe|" + sigId);
+   else if(action == "SELL")
+      ok = trade.Sell(volume, symbol, 0.0, sl, tp, "MonWe|" + sigId);
+   else
+   {
+      Print("❌ Action inconnue: ", action);
+      return;
+   }
+
+   if(ok)
+   {
+      ulong ticket = trade.ResultOrder();
+      PrintFormat("✅ Exécuté: %s %s — Ticket #%d", action, symbol, ticket);
+      ConfirmExecution(sigId, ticket);
+   }
+   else
+   {
+      PrintFormat("❌ Échec: %s — Code: %d (%s)",
+                  symbol, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      // On confirme quand même pour ne pas re-traiter en boucle
+      ConfirmExecution(sigId, 0);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Confirme l'exécution à l'API (POST)                             |
+//+------------------------------------------------------------------+
+void ConfirmExecution(string sigId, ulong ticket)
+{
+   string url = InpApiUrl + "/api/ea-poll";
+   string json = "{\"key\":\"" + InpSecret + "\",\"id\":\"" + sigId +
+                 "\",\"ticket\":" + IntegerToString((long)ticket) + "}";
+
+   char   post[];
+   char   result[];
+   string resultHeaders;
+   StringToCharArray(json, post, 0, StringLen(json));
+   ArrayResize(post, StringLen(json)); // sans le \0 final
+
+   string headers = "Content-Type: application/json\r\n";
+
+   ResetLastError();
+   int code = WebRequest("POST", url, headers, 5000, post, result, resultHeaders);
+
+   if(code == 200)
+   {
+      if(InpVerbose) Print("✓ Confirmation envoyée pour signal ", sigId);
+   }
+   else
+   {
+      Print("⚠ Confirmation échouée (code ", code, ", err ", GetLastError(), ")");
+   }
+}
+//+------------------------------------------------------------------+
