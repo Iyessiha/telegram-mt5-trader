@@ -483,7 +483,7 @@ const CFG = {
   get chatId()  { return localStorage.getItem('mw_chatId')  || '' },
   get vol()     { return parseFloat(localStorage.getItem('mw_vol') || '1.0') },
   get minRR()   { return parseFloat(localStorage.getItem('mw_rr')  || '1.0') },
-  get symbols() { return (localStorage.getItem('mw_symbols') || 'XAUUSD,BTCUSD,ETHUSD,XAGUSD,EURUSD,GBPUSD,USDJPY,AUDUSD').split(',') },
+  get symbols() { return (localStorage.getItem('mw_symbols') || 'XAUUSD,BTCUSD,ETHUSD,XAGUSD,EURUSD,GBPUSD,USDJPY,AUDUSD,US30,US500,USTEC,NAS100,SPX500,GER40,UK100,FRA40,JP225,US2000').split(',') },
   base()        { return this.url || window.location.origin }
 };
 
@@ -800,7 +800,8 @@ function parseStructured(text) {
   }
 
   // 5) Symbole: ticker connu sinon défaut XAUUSD
-  const known = ['XAUUSD','BTCUSD','XAGUSD','EURUSD','GBPUSD','USDJPY','ETHUSD','US30','NAS100','GER40'];
+  const known = ['XAUUSD','BTCUSD','XAGUSD','EURUSD','GBPUSD','USDJPY','ETHUSD',
+                 'US30','US500','USTEC','NAS100','SPX500','GER40','DE40','UK100','FRA40','JP225','US2000','DJI30','NDX100'];
   let symbol = known.find(k => joined.includes(k)) || 'XAUUSD';
 
   // Cohérence finale: SL du bon côté (corrige le sens si contradiction nette)
