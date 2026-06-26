@@ -714,7 +714,7 @@ function parseAndShow() {
   const vol = parseFloat(document.getElementById('sigVolume').value) || CFG.vol;
   if (!raw) { toast('Collez un signal', 'err'); return; }
 
-  const sig = parseStationX(raw) || parseDirect(raw);
+  const sig = parseStationX(raw) || parseStructured(raw) || parseDirect(raw);
   if (!sig) {
     document.getElementById('noSig').innerHTML = '<div class="badge err">✗ Format non reconnu</div><p style="margin-top:8px;font-size:12px;color:var(--muted)">Utilisez le format Station X ou direct</p>';
     document.getElementById('noSig').style.display = 'block';
@@ -744,6 +744,68 @@ function parseStationX(text) {
   if (takeProfits.length === 0) return null;
   const sl = parseFloat(slLine.match(/SL\s*:\s*([\d.]+)/i)[1]);
   return { action, symbol, entry, stopLoss: sl, takeProfit: takeProfits[0], takeProfits, volume: 1.0 };
+}
+
+// Format structuré: ENTRÉE / INVALIDATION / TP1 / TP2 / TP3 (sens déduit)
+function parseStructured(text) {
+  const lines = text.split('\n').map(l => l.trim());
+  const joined = text.toUpperCase();
+
+  // 1) Entrée (accepte une fourchette "4082-4085" -> milieu)
+  const entLine = lines.find(l => /(ENTR[ÉE]E?|ENTRY)\s*[:\-]?\s*[\d]/i.test(l));
+  if (!entLine) return null;
+  const entNums = (entLine.match(/(\d+(?:[.,]\d+)?)/g) || []).map(n => parseFloat(n.replace(',', '.')));
+  if (entNums.length === 0) return null;
+  // si fourchette (2 premiers nombres proches), prendre le milieu
+  let entry;
+  if (entNums.length >= 2 && Math.abs(entNums[0] - entNums[1]) / entNums[0] < 0.02) {
+    entry = (entNums[0] + entNums[1]) / 2;
+  } else {
+    entry = entNums[0];
+  }
+
+  // 2) SL = INVALIDATION (ou SL/STOP)
+  const slLine = lines.find(l => /(INVALIDATION|STOP|SL)\b/i.test(l) && /\d/.test(l));
+  if (!slLine) return null;
+  const slNums = (slLine.match(/(\d+(?:[.,]\d+)?)/g) || []).map(n => parseFloat(n.replace(',', '.')));
+  if (slNums.length === 0) return null;
+  const sl = slNums[0];
+
+  // 3) TP1, TP2, TP3... (prend le 1er nombre de chaque ligne TP)
+  const tpLines = lines.filter(l => /TP\s*\d*\s*[:\-]/i.test(l));
+  if (tpLines.length === 0) return null;
+  const takeProfits = tpLines.map(l => {
+    const m = l.match(/TP\s*\d*\s*[:\-]\s*(\d+(?:[.,]\d+)?)/i);
+    return m ? parseFloat(m[1].replace(',', '.')) : null;
+  }).filter(v => v && v > 0);
+  if (takeProfits.length === 0) return null;
+
+  // 4) Sens déduit: si les TP sont au-dessus de l'entrée -> BUY, sinon SELL
+  const avgTp = takeProfits.reduce((a, b) => a + b, 0) / takeProfits.length;
+  const action = avgTp > entry ? 'BUY' : 'SELL';
+
+  // 5) Symbole: chercher un ticker connu, sinon défaut (réglage ou XAUUSD)
+  const known = ['XAUUSD','BTCUSD','XAGUSD','EURUSD','GBPUSD','USDJPY','ETHUSD','US30','NAS100','GER40'];
+  let symbol = known.find(k => joined.includes(k)) || null;
+  if (!symbol) {
+    symbol = (window.CFG && CFG.defaultSymbol && CFG.defaultSymbol()) || 'XAUUSD';
+  }
+
+  // Cohérence: SL du bon côté (sinon on corrige le sens)
+  // BUY -> SL sous l'entrée ; SELL -> SL au-dessus
+  let act = action;
+  if (act === 'BUY' && sl > entry) act = 'SELL';
+  if (act === 'SELL' && sl < entry) act = 'BUY';
+
+  return {
+    action: act,
+    symbol,
+    entry: parseFloat(entry.toFixed(3)),
+    stopLoss: sl,
+    takeProfit: takeProfits[0],
+    takeProfits,
+    volume: 1.0
+  };
 }
 
 function parseDirect(text) {
