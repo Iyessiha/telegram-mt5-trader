@@ -1,6 +1,19 @@
 import { TradeSignal, ValidationResult } from '../types/index';
 
-const ALLOWED_SYMBOLS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF'];
+const ALLOWED_SYMBOLS = [
+  // Forex majeurs
+  'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF',
+  'EURGBP', 'EURJPY', 'GBPJPY', 'EURCHF', 'AUDJPY', 'CADJPY', 'CHFJPY', 'EURCAD', 'EURAUD', 'GBPAUD', 'GBPCAD',
+  // Métaux
+  'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD',
+  // Crypto
+  'BTCUSD', 'ETHUSD', 'LTCUSD', 'XRPUSD', 'BCHUSD', 'ADAUSD', 'SOLUSD', 'DOGEUSD', 'BNBUSD',
+  // Indices
+  'US30', 'US500', 'USTEC', 'NAS100', 'SPX500', 'DJI30', 'NDX100',
+  'GER40', 'DE40', 'UK100', 'FRA40', 'EU50', 'ESP35', 'JP225', 'AUS200', 'HK50', 'US2000',
+  // Énergie
+  'USOIL', 'UKOIL', 'WTI', 'BRENT', 'XBRUSD', 'XTIUSD',
+];
 const MAX_VOLUME = 10;
 const MIN_VOLUME = 0.01;
 
@@ -16,9 +29,12 @@ export function validateSignal(signal: TradeSignal): ValidationResult {
       return { ok: false, error: 'Invalid action (BUY or SELL)' };
     }
 
-    // Check symbol is allowed
-    if (!ALLOWED_SYMBOLS.includes(signal.symbol)) {
-      return { ok: false, error: `Symbol not allowed. Allowed: ${ALLOWED_SYMBOLS.join(', ')}` };
+    // Check symbol is allowed (liste connue OU format de ticker valide)
+    const sym = String(signal.symbol).toUpperCase();
+    const isKnown = ALLOWED_SYMBOLS.includes(sym);
+    const looksLikeTicker = /^[A-Z0-9]{3,12}$/.test(sym);
+    if (!isKnown && !looksLikeTicker) {
+      return { ok: false, error: `Symbole invalide: "${signal.symbol}"` };
     }
 
     // Check entry price is positive

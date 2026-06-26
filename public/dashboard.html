@@ -1243,8 +1243,21 @@ async function checkHealth() {
     document.getElementById('connLabel').textContent = ok ? 'Connecté' : 'Partiel';
     setDot('vercelDot', 'ok');
     setDot('supaDot', h.services?.supabase === 'OK' ? 'ok' : 'err');
-    setDot('botDot',   h.services?.mt5 === 'OK' ? 'ok' : 'warn');
-    addLog(`Santé: ${h.status} | Supabase:${h.services?.supabase} | MT5:${h.services?.mt5}`, ok ? 'ok' : 'info');
+
+    // Statut MT5 = activité EA récente (un compte actif < 10 min)
+    let mt5Status = 'inactif';
+    try {
+      const st = await api('/api/account-stats');
+      const accts = st.accounts || [];
+      const now = Date.now();
+      const active = accts.filter(a => a.lastActivity && (now - new Date(a.lastActivity).getTime()) < 10*60*1000);
+      if (active.length > 0) mt5Status = `${active.length} EA actif(s)`;
+      else if (accts.length > 0) mt5Status = `${accts.length} compte(s), inactif`;
+    } catch(_) {}
+
+    const mt5Ok = mt5Status.includes('actif(s)');
+    setDot('botDot', mt5Ok ? 'ok' : 'warn');
+    addLog(`Santé: ${h.status} | Supabase:${h.services?.supabase} | MT5: ${mt5Status}`, ok ? 'ok' : 'info');
   } catch(e) {
     setDot('connDot', 'err');
     document.getElementById('connLabel').textContent = 'Hors-ligne';
