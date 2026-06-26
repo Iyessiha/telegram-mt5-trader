@@ -838,7 +838,9 @@ function showPreview(sig) {
   document.getElementById('pv-vol').textContent    = sig.volume;
 
   const risk   = Math.abs(sig.entry - sig.stopLoss);
-  const reward = Math.abs(sig.takeProfit - sig.entry);
+  const tps    = (sig.takeProfits && sig.takeProfits.length) ? sig.takeProfits : [sig.takeProfit];
+  const farTp  = tps.reduce((far, tp) => Math.abs(tp - sig.entry) > Math.abs(far - sig.entry) ? tp : far, tps[0]);
+  const reward = Math.abs(farTp - sig.entry);
   const rr     = risk > 0 ? (reward / risk) : 0;
   document.getElementById('pv-rr').textContent = rr.toFixed(2) + ':1';
   document.getElementById('rrFill').style.width = Math.min(rr * 25, 100) + '%';
@@ -872,7 +874,9 @@ function validateSig(s) {
     if (s.stopLoss  <= s.entry) errors.push('SELL: SL doit être AU-DESSUS de l\'entrée');
   }
   const risk = Math.abs(s.entry - s.stopLoss);
-  const reward = Math.abs(s.takeProfit - s.entry);
+  const tpsW   = (s.takeProfits && s.takeProfits.length) ? s.takeProfits : [s.takeProfit];
+  const farTpW = tpsW.reduce((far, tp) => Math.abs(tp - s.entry) > Math.abs(far - s.entry) ? tp : far, tpsW[0]);
+  const reward = Math.abs(farTpW - s.entry);
   if (risk > 0 && reward/risk < CFG.minRR) warns.push(`R/R faible: ${(reward/risk).toFixed(2)}:1`);
   if (s.volume > 10) errors.push('Volume > 10 lots');
   return { errors, warns };
@@ -1338,6 +1342,12 @@ if ('serviceWorker' in navigator) {
 // INIT
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+  // Migration unique: réinitialise la liste de symboles vers le défaut élargi (crypto+indices)
+  const SYM_VERSION = '2';
+  if (localStorage.getItem('mw_symbols_v') !== SYM_VERSION) {
+    localStorage.removeItem('mw_symbols');       // force le défaut élargi
+    localStorage.setItem('mw_symbols_v', SYM_VERSION);
+  }
   loadSettingsUI();
   startClock();
   loadOverview();

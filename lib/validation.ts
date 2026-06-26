@@ -73,8 +73,15 @@ export function validateSignal(signal: TradeSignal): ValidationResult {
     }
 
     // Calculate risk and reward
+    // Reward basé sur le TP le plus ÉLOIGNÉ (multi-TP: on vise la cible lointaine)
     const risk = Math.abs(signal.entry - signal.stopLoss);
-    const reward = Math.abs(signal.takeProfit - signal.entry);
+    const tpList: number[] = (Array.isArray((signal as any).takeProfits) && (signal as any).takeProfits.length)
+      ? (signal as any).takeProfits
+      : [signal.takeProfit];
+    const farthestTp = tpList.reduce((far, tp) =>
+      Math.abs(tp - signal.entry) > Math.abs(far - signal.entry) ? tp : far
+    , tpList[0]);
+    const reward = Math.abs(farthestTp - signal.entry);
 
     if (risk === 0) {
       return { ok: false, error: 'Stop loss must be different from entry' };
