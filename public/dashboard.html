@@ -2,20 +2,35 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5">
 <title>MonWe Trading Dashboard</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="MonWe Trading">
+<link rel="icon" type="image/png" href="/favicon.png">
+
+<!-- iOS / Apple -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MonWe">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 :root{--bg:#0a0e1a;--surface:#111827;--card:#1a2236;--border:#253047;--accent:#00d4ff;--green:#00e676;--red:#ff1744;--yellow:#ffab00;--text:#e2e8f0;--muted:#64748b;--dim:#94a3b8}
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;overflow:hidden}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;display:flex;flex-direction:column}
+html{height:100%}
+html,body{overflow:hidden;overscroll-behavior:none;-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;display:flex;flex-direction:column;height:100%;height:100dvh}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:var(--surface)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 /* ===== HEADER ===== */
-.header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:52px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;z-index:10}
+.header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;padding-top:env(safe-area-inset-top);height:calc(52px + env(safe-area-inset-top));background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;z-index:10}
 .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;color:var(--accent)}
 .logo-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),#0080ff);border-radius:6px;display:grid;place-items:center;font-size:14px}
 .status-bar{display:flex;align-items:center;gap:16px}
@@ -163,6 +178,53 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .conn-badge{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;background:rgba(37,48,71,.5);border:1px solid var(--border)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .grow{flex:1}
+/* ===== MOBILE / PWA ===== */
+.tab-panel{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+
+@media(max-width:600px){
+  body{font-size:15px}
+  .header{padding:0 14px;padding-top:env(safe-area-inset-top)}
+  .logo{font-size:15px;gap:8px}
+  .logo-icon{width:26px;height:26px}
+  .header-time{display:none}              /* gagne de la place */
+  .status-bar{gap:10px}
+  .status-dot{font-size:11px}
+
+  .nav{padding:0 6px}
+  .nav-btn{padding:11px 12px;font-size:13px}
+
+  .tab-panel{padding:14px}
+  .card{padding:14px;border-radius:10px}
+
+  /* tout passe en une colonne */
+  .stats-grid,.charts-grid,.sig-grid,.perf-grid,.settings-grid{grid-template-columns:1fr !important}
+
+  /* zones tactiles plus grandes */
+  .btn{padding:13px 18px;font-size:15px}
+  .btn-row{flex-direction:column}
+  .btn-row .btn{width:100%;justify-content:center}
+  input,select,textarea{font-size:16px !important}  /* >=16px = pas de zoom auto iOS */
+
+  /* le gros bouton EXÉCUTER bien visible et atteignable */
+  #execBtn{width:100%;padding:16px;font-size:16px}
+
+  .filters{flex-direction:column;align-items:stretch}
+  .filters>*{width:100%}
+
+  .alert-log{max-height:46vh}
+  .modal{width:94%;padding:18px}
+}
+
+/* très petits écrans */
+@media(max-width:360px){
+  .nav-btn{padding:10px 9px;font-size:12px}
+  .tab-panel{padding:10px}
+}
+
+/* mode installé (standalone) : petit raffinement */
+@media(display-mode:standalone){
+  .header{ -webkit-user-select:none; user-select:none; }
+}
 </style>
 </head>
 <body>
@@ -995,6 +1057,64 @@ function fmtDate(d) {
 function rLabel(r) {
   return r === 'win' ? '🏆 Gagné' : r === 'loss' ? '❌ Perdu' : '⚖ BE';
 }
+
+// ============================================================
+// PWA : service worker + invite d'installation
+// ============================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+(function setupInstall(){
+  let deferredPrompt = null;
+
+  function banner(html){
+    let b = document.getElementById('pwaBanner');
+    if(!b){
+      b = document.createElement('div');
+      b.id = 'pwaBanner';
+      b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9999;background:#1a2236;border:1px solid #253047;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:14px';
+      document.body.appendChild(b);
+    }
+    b.innerHTML = html;
+    return b;
+  }
+
+  // Android / Chrome / Edge
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const b = banner(
+      '<span style="flex:1">📲 Installer MonWe Trading sur ton appareil</span>'+
+      '<button id="pwaInstall" style="background:#00d4ff;color:#06121f;border:none;border-radius:8px;padding:9px 14px;font-weight:700;font-size:14px">Installer</button>'+
+      '<button id="pwaClose" style="background:none;border:none;color:#64748b;font-size:20px;line-height:1">×</button>'
+    );
+    b.querySelector('#pwaInstall').onclick = async () => {
+      b.remove();
+      if(deferredPrompt){ deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; }
+    };
+    b.querySelector('#pwaClose').onclick = () => b.remove();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    const b = document.getElementById('pwaBanner'); if(b) b.remove();
+  });
+
+  // iOS (Safari ne supporte pas beforeinstallprompt) : astuce une seule fois
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (isIOS && !isStandalone && !localStorage.getItem('iosInstallHint')) {
+    setTimeout(() => {
+      const b = banner(
+        '<span style="flex:1">📲 Installer : appuie sur <b>Partager</b> puis <b>« Sur l\u2019écran d\u2019accueil »</b></span>'+
+        '<button id="pwaClose" style="background:none;border:none;color:#64748b;font-size:20px;line-height:1">×</button>'
+      );
+      b.querySelector('#pwaClose').onclick = () => { b.remove(); localStorage.setItem('iosInstallHint','1'); };
+    }, 1500);
+  }
+})();
 
 // ============================================================
 // INIT
