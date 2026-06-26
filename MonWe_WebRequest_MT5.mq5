@@ -18,6 +18,8 @@ input int     InpPollSeconds = 5;                   // Fréquence de vérificati
 input double  InpMaxVolume   = 1.0;                 // Volume max autorisé (sécurité)
 input int     InpSlippage    = 30;                  // Slippage max (points)
 input int     InpMagic       = 20260626;            // Magic number
+input string  InpSymbolPrefix = "";                 // Préfixe symbole broker (souvent vide)
+input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (Exness = "c")
 input bool    InpVerbose     = true;                // Journaux détaillés
 
 //--- Variables globales
@@ -141,6 +143,9 @@ void ProcessSignal(string line)
    double volume = StringToDouble(p[4]);
    double sl     = StringToDouble(p[5]);
    double tp     = StringToDouble(p[6]);
+
+   // Adapter le symbole au broker (Exness: XAUUSD -> XAUUSDc)
+   symbol = InpSymbolPrefix + symbol + InpSymbolSuffix;
 
    // Sécurité volume
    if(volume > InpMaxVolume)
