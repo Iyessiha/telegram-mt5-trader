@@ -20,6 +20,7 @@ input int     InpSlippage    = 30;                  // Slippage max (points)
 input int     InpMagic       = 20260626;            // Magic number
 input string  InpSymbolPrefix = "";                 // Préfixe symbole broker (souvent vide)
 input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (Exness = "c")
+input string  InpAllowedSymbols = "XAUUSD,BTCUSD";  // Symboles autorisés (vide = tous). Ex: XAUUSD,BTCUSD
 input bool    InpVerbose     = true;                // Journaux détaillés
 
 //--- Variables globales
@@ -126,6 +127,38 @@ void PollSignals()
 //+------------------------------------------------------------------+
 //| Traite un signal : ID;ACTION;SYMBOL;ENTRY;VOLUME;SL;TP          |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Vérifie si le symbole (brut, ex: XAUUSD) est dans la liste       |
+//| autorisée. Tolère les variantes Gold/BTC.                        |
+//+------------------------------------------------------------------+
+bool IsSymbolAllowed(string rawSymbol)
+{
+   string up = rawSymbol;
+   StringToUpper(up);
+
+   string allowed[];
+   int n = StringSplit(InpAllowedSymbols, ',', allowed);
+   for(int i = 0; i < n; i++)
+   {
+      string a = allowed[i];
+      StringTrimRight(a);
+      StringTrimLeft(a);
+      StringToUpper(a);
+      if(StringLen(a) == 0) continue;
+
+      // Correspondance exacte
+      if(up == a) return true;
+
+      // Tolérance familles: "XAU" couvre XAUUSD/GOLD, "BTC" couvre BTCUSD/BITCOIN
+      if(a == "XAUUSD" || a == "GOLD" || a == "XAU")
+         if(StringFind(up, "XAU") >= 0 || StringFind(up, "GOLD") >= 0) return true;
+      if(a == "BTCUSD" || a == "BTC" || a == "BITCOIN")
+         if(StringFind(up, "BTC") >= 0 || StringFind(up, "BITCOIN") >= 0) return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
 void ProcessSignal(string line)
 {
    string p[];
@@ -138,11 +171,21 @@ void ProcessSignal(string line)
 
    string sigId  = p[0];
    string action = p[1];
-   string symbol = p[2];
+   string symbol = p[2];   // symbole brut du signal (ex: XAUUSD)
    double entry  = StringToDouble(p[3]);
    double volume = StringToDouble(p[4]);
    double sl     = StringToDouble(p[5]);
    double tp     = StringToDouble(p[6]);
+
+   // ---- FILTRE: seuls les symboles autorisés passent ----
+   if(StringLen(InpAllowedSymbols) > 0 && !IsSymbolAllowed(symbol))
+   {
+      if(InpVerbose)
+         Print("⛔ Symbole non autorisé: ", symbol, " (autorisés: ", InpAllowedSymbols, ")");
+      // On confirme pour ne pas re-traiter en boucle
+      ConfirmExecution(sigId, 0);
+      return;
+   }
 
    // Adapter le symbole au broker (Exness: XAUUSD -> XAUUSDc)
    symbol = InpSymbolPrefix + symbol + InpSymbolSuffix;
