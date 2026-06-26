@@ -63,7 +63,8 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void PollSignals()
 {
-   string url = InpApiUrl + "/api/ea-poll?key=" + InpSecret + "&platform=mt5";
+   string url = InpApiUrl + "/api/ea-poll?key=" + InpSecret + "&platform=mt5"
+                + "&account=" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
 
    char   post[];
    char   result[];
@@ -242,7 +243,9 @@ void ConfirmExecution(string sigId, ulong ticket)
 {
    string url = InpApiUrl + "/api/ea-poll";
    string json = "{\"key\":\"" + InpSecret + "\",\"id\":\"" + sigId +
-                 "\",\"ticket\":" + IntegerToString((long)ticket) + "}";
+                 "\",\"ticket\":" + IntegerToString((long)ticket) +
+                 ",\"account\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\"" +
+                 ",\"platform\":\"mt5\"}";
 
    char   post[];
    char   result[];
