@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(empty);
     }
 
-    const executed = signals.filter(s => s.status === 'executed');
+    const executed = signals.filter(s => s.status === 'executed' || s.status === 'closed');
     const closed   = executed.filter(s => s.result);
     const wins     = closed.filter(s => s.result === 'win');
     const losses   = closed.filter(s => s.result === 'loss');
