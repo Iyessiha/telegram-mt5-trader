@@ -26,7 +26,9 @@ input double  InpMaxVolume   = 1.0;                 // Volume max autorisé (sé
 input int     InpSlippage    = 30;                  // Slippage max (points)
 input int     InpMagic       = 20260626;            // Magic number
 input string  InpSymbolPrefix = "";                 // Préfixe symbole broker (souvent vide)
-input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (Exness = "c")
+input string  InpSymbolSuffix = "c";                // Suffixe par défaut (Exness = "c")
+input string  InpSymbolMap    = "";                 // Mapping spécifique: SIGNAL=BROKER,... (ex: US30=US30,BTCUSD=BTCUSD)
+input bool    InpAutoResolveSymbol = true;          // Si introuvable, chercher le bon nom automatiquement
 input string  InpAllowedSymbols = "";               // Symboles autorisés (vide = TOUS). Ex: XAUUSD,BTCUSD
 input bool    InpVerbose     = true;                // Journaux détaillés
 
@@ -182,6 +184,84 @@ bool IsSymbolAllowed(string rawSymbol)
 }
 
 //+------------------------------------------------------------------+
+//| Résout le nom du symbole chez le broker                          |
+//| Priorité: 1) mapping explicite  2) préfixe/suffixe  3) auto      |
+//+------------------------------------------------------------------+
+bool SymbolExistsBroker(string s)
+{
+   if(StringLen(s) == 0) return false;
+   if(SymbolSelect(s, true)) return true;
+   // SymbolSelect peut réussir même si déjà visible; vérifier via SymbolInfoInteger
+   long sel = 0;
+   if(SymbolInfoInteger(s, SYMBOL_SELECT, sel)) return true;
+   return false;
+}
+
+string ResolveBrokerSymbol(string raw)
+{
+   string up = raw;
+   StringToUpper(up);
+
+   // ---- 1) Mapping explicite "SIGNAL=BROKER,SIGNAL=BROKER" ----
+   if(StringLen(InpSymbolMap) > 0)
+   {
+      string pairs[];
+      int n = StringSplit(InpSymbolMap, ',', pairs);
+      for(int i = 0; i < n; i++)
+      {
+         string kv[];
+         if(StringSplit(pairs[i], '=', kv) == 2)
+         {
+            string k = kv[0]; StringTrimLeft(k); StringTrimRight(k); StringToUpper(k);
+            string v = kv[1]; StringTrimLeft(v); StringTrimRight(v);
+            if(k == up)
+            {
+               if(InpVerbose) Print("🔗 Mapping: ", raw, " → ", v);
+               return v;  // nom broker explicite, tel quel
+            }
+         }
+      }
+   }
+
+   // ---- 2) Préfixe + symbole + suffixe (comportement par défaut) ----
+   string candidate = InpSymbolPrefix + raw + InpSymbolSuffix;
+   if(SymbolExistsBroker(candidate))
+      return candidate;
+
+   // ---- 3) Résolution automatique si introuvable ----
+   if(InpAutoResolveSymbol)
+   {
+      // a) tel quel, sans préfixe/suffixe
+      if(SymbolExistsBroker(raw)) { if(InpVerbose) Print("🔍 Résolu sans suffixe: ", raw); return raw; }
+
+      // b) variantes de suffixes courants
+      string suffixes[] = {"", "c", "m", "z", ".r", "_raw", "pro", "#"};
+      for(int i = 0; i < ArraySize(suffixes); i++)
+      {
+         string t = InpSymbolPrefix + raw + suffixes[i];
+         if(SymbolExistsBroker(t)) { if(InpVerbose) Print("🔍 Résolu (suffixe '", suffixes[i], "'): ", t); return t; }
+      }
+
+      // c) scan complet de la liste des symboles du broker (commence par 'raw')
+      int total = SymbolsTotal(false);
+      for(int i = 0; i < total; i++)
+      {
+         string name = SymbolName(i, false);
+         string nu = name; StringToUpper(nu);
+         if(StringFind(nu, up) == 0)  // commence par le symbole brut
+         {
+            if(InpVerbose) Print("🔍 Résolu par scan: ", raw, " → ", name);
+            return name;
+         }
+      }
+   }
+
+   // Aucune correspondance: renvoyer le candidat préfixe/suffixe (échouera proprement plus loin)
+   if(InpVerbose) Print("⚠ Symbole non résolu pour ", raw, " — tentative avec ", candidate);
+   return candidate;
+}
+
+//+------------------------------------------------------------------+
 void ProcessSignal(string line)
 {
    string p[];
@@ -210,8 +290,8 @@ void ProcessSignal(string line)
       return;
    }
 
-   // Adapter le symbole au broker (Exness: XAUUSD -> XAUUSDc)
-   symbol = InpSymbolPrefix + symbol + InpSymbolSuffix;
+   // Adapter le symbole au broker (mapping spécifique > suffixe > résolution auto)
+   symbol = ResolveBrokerSymbol(symbol);
 
    // Sécurité volume
    if(volume > InpMaxVolume)
