@@ -651,20 +651,23 @@ function parseStationX(text) {
   const action = aMatch[1].toUpperCase().startsWith('V') ? 'SELL' : 'BUY';
   const symbol = aMatch[2].toUpperCase();
   const entry  = parseFloat(aMatch[3]);
-  // Prendre la valeur APRÈS les deux-points (évite d'attraper le "1" de "TP1")
-  const tpLine = lines.find(l => /TP\s*\d*\s*:\s*([\d.]+)/i.test(l));
-  const slLine = lines.find(l => /SL\s*:\s*([\d.]+)/i.test(l));
-  if (!tpLine || !slLine) return null;
-  const tp = parseFloat(tpLine.match(/TP\s*\d*\s*:\s*([\d.]+)/i)[1]);
+  // Collecter TOUS les TP (TP1, TP2, TP3...) — valeur après les deux-points
+  const tpLines = lines.filter(l => /TP\s*\d*\s*:\s*([\d.]+)/i.test(l));
+  const slLine  = lines.find(l => /SL\s*:\s*([\d.]+)/i.test(l));
+  if (tpLines.length === 0 || !slLine) return null;
+  const takeProfits = tpLines
+    .map(l => parseFloat(l.match(/TP\s*\d*\s*:\s*([\d.]+)/i)[1]))
+    .filter(v => v > 0);
+  if (takeProfits.length === 0) return null;
   const sl = parseFloat(slLine.match(/SL\s*:\s*([\d.]+)/i)[1]);
-  return { action, symbol, entry, stopLoss: sl, takeProfit: tp, volume: 1.0 };
+  return { action, symbol, entry, stopLoss: sl, takeProfit: takeProfits[0], takeProfits, volume: 1.0 };
 }
 
 function parseDirect(text) {
   const m = text.trim().match(/^(BUY|SELL)\s+(\w+)\s+([\d.]+)\s+SL:([\d.]+)\s+TP:([\d.]+)(?:\s+VOL:([\d.]+))?/i);
   if (!m) return null;
   return { action:m[1].toUpperCase(), symbol:m[2].toUpperCase(), entry:parseFloat(m[3]),
-    stopLoss:parseFloat(m[4]), takeProfit:parseFloat(m[5]), volume:m[6]?parseFloat(m[6]):1.0 };
+    stopLoss:parseFloat(m[4]), takeProfit:parseFloat(m[5]), takeProfits:[parseFloat(m[5])], volume:m[6]?parseFloat(m[6]):1.0 };
 }
 
 function showPreview(sig) {
@@ -675,7 +678,7 @@ function showPreview(sig) {
   document.getElementById('pv-symbol').textContent = sig.symbol;
   document.getElementById('pv-entry').textContent  = sig.entry;
   document.getElementById('pv-sl').textContent     = sig.stopLoss;
-  document.getElementById('pv-tp').textContent     = sig.takeProfit;
+  document.getElementById('pv-tp').textContent     = (sig.takeProfits && sig.takeProfits.length ? sig.takeProfits : [sig.takeProfit]).join(' / ');
   document.getElementById('pv-vol').textContent    = sig.volume;
 
   const risk   = Math.abs(sig.entry - sig.stopLoss);
@@ -725,19 +728,32 @@ async function executeSignal() {
   btn.disabled = true;
   btn.textContent = '⏳ Exécution...';
 
-  const msg = `${currentSignal.action} ${currentSignal.symbol} ${currentSignal.entry} SL:${currentSignal.stopLoss} TP:${currentSignal.takeProfit} VOL:${currentSignal.volume}`;
+  // Un trade par TP (TP1, TP2, TP3...). Volume = volume PAR trade.
+  const tps = (currentSignal.takeProfits && currentSignal.takeProfits.length)
+    ? currentSignal.takeProfits
+    : [currentSignal.takeProfit];
 
   try {
-    const data = await api('/api/telegram-webhook', {
-      method: 'POST',
-      body: JSON.stringify({ message: msg, user_id: 'dashboard' })
-    });
+    let placed = 0;
+    for (let i = 0; i < tps.length; i++) {
+      const tp = tps[i];
+      const msg = `${currentSignal.action} ${currentSignal.symbol} ${currentSignal.entry} SL:${currentSignal.stopLoss} TP:${tp} VOL:${currentSignal.volume}`;
+      const data = await api('/api/telegram-webhook', {
+        method: 'POST',
+        body: JSON.stringify({ message: msg, user_id: 'dashboard' })
+      });
+      if (data.success) {
+        placed++;
+        addLog(`✓ ${currentSignal.action} ${currentSignal.symbol} @ ${currentSignal.entry} → TP${i+1}:${tp} (${currentSignal.volume} lot)`, 'ok');
+      }
+    }
 
-    if (data.success) {
-      document.getElementById('execResult').innerHTML = `<div class="badge ok">✓ Exécuté! Ordre #${data.signal.orderId || '—'}</div>`;
-      toast(`Signal exécuté: ${currentSignal.action} ${currentSignal.symbol}`, 'ok');
-      addLog(`✓ ${currentSignal.action} ${currentSignal.symbol} @ ${currentSignal.entry}`, 'ok');
+    if (placed > 0) {
+      document.getElementById('execResult').innerHTML = `<div class="badge ok">✓ ${placed} trade(s) envoyé(s)</div>`;
+      toast(`${placed} trade(s) envoyé(s): ${currentSignal.action} ${currentSignal.symbol}`, 'ok');
       setTimeout(resetSignal, 2000);
+    } else {
+      throw new Error('Aucun trade placé');
     }
   } catch(e) {
     document.getElementById('execResult').innerHTML = `<div class="badge err">✗ ${e.message}</div>`;
