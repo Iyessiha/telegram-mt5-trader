@@ -134,6 +134,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .chip.win{background:rgba(0,230,118,.15);color:var(--green)}
 .chip.loss{background:rgba(255,23,68,.15);color:var(--red)}
 .chip.breakeven{background:rgba(100,116,139,.15);color:var(--muted)}
+.chip.closed{background:rgba(0,212,255,.12);color:var(--accent)}
+.chip.open{background:rgba(255,171,0,.12);color:var(--yellow)}
 .chip.buy{background:rgba(0,230,118,.1);color:var(--green)}
 .chip.sell{background:rgba(255,23,68,.1);color:var(--red)}
 
@@ -246,6 +248,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <button class="nav-btn active" onclick="switchTab('overview')">📊 Vue d'ensemble</button>
   <button class="nav-btn" onclick="switchTab('signals')">📝 Signaux</button>
   <button class="nav-btn" onclick="switchTab('performance')">📈 Performance</button>
+  <button class="nav-btn" onclick="switchTab('accounts')">👥 Comptes</button>
   <button class="nav-btn" onclick="switchTab('history')">📋 Historique</button>
   <button class="nav-btn" onclick="switchTab('alerts')">🔔 Alertes</button>
   <button class="nav-btn" onclick="switchTab('settings')">⚙️ Paramètres</button>
@@ -337,6 +340,23 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="card">
     <div class="card-title">📊 Statistiques Détaillées</div>
     <div class="stats-grid" id="detailStats" style="margin-bottom:0"></div>
+  </div>
+</div>
+
+<!-- TAB: ACCOUNTS -->
+<div class="tab-panel" id="tab-accounts">
+  <div class="card" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <div>
+      <h2 style="font-size:16px;margin-bottom:4px">👥 Performance par compte</h2>
+      <p style="font-size:12px;color:var(--muted)">Suivi de chaque compte connecté (copy-trading)</p>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="loadAccounts()">🔄 Actualiser</button>
+  </div>
+
+  <div id="accountsSummary" class="stats-grid" style="margin-bottom:14px"></div>
+
+  <div id="accountsBody">
+    <div class="card"><p class="empty">Chargement…</p></div>
   </div>
 </div>
 
@@ -523,6 +543,7 @@ function switchTab(id) {
   if (id === 'overview')     loadOverview();
   if (id === 'history')      loadHistory();
   if (id === 'performance')  loadPerformance();
+  if (id === 'accounts')     loadAccounts();
   if (id === 'alerts')       checkHealth();
 }
 
@@ -953,6 +974,117 @@ function exportCSV() {
   a.download = 'monwe-trades-' + new Date().toISOString().slice(0,10) + '.csv';
   a.click();
   toast('CSV exporté ✓', 'ok');
+}
+
+// ============================================================
+// ACCOUNTS (multi-comptes)
+// ============================================================
+let accountsCache = [];
+
+async function loadAccounts() {
+  const body = document.getElementById('accountsBody');
+  body.innerHTML = '<div class="card"><p class="empty">Chargement…</p></div>';
+  try {
+    const data = await api('/api/account-stats');
+    accountsCache = data.accounts || [];
+    renderAccountsSummary(accountsCache);
+    renderAccounts(accountsCache);
+  } catch(e) {
+    body.innerHTML = `<div class="card"><p class="empty">Erreur: ${e.message}</p></div>`;
+  }
+}
+
+function renderAccountsSummary(accounts) {
+  const totalPnl = accounts.reduce((s,a) => s + (Number(a.totalPnl)||0), 0);
+  const totalTrades = accounts.reduce((s,a) => s + (a.totalTrades||0), 0);
+  const totalWins = accounts.reduce((s,a) => s + (a.wins||0), 0);
+  const totalClosed = accounts.reduce((s,a) => s + (a.closedTrades||0), 0);
+  const wr = totalClosed > 0 ? (totalWins/totalClosed*100).toFixed(1) : '0';
+  const pnlColor = totalPnl > 0 ? 'var(--green)' : totalPnl < 0 ? 'var(--red)' : 'var(--muted)';
+
+  document.getElementById('accountsSummary').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Comptes</div><div class="stat-value">${accounts.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Trades totaux</div><div class="stat-value">${totalTrades}</div></div>
+    <div class="stat-card"><div class="stat-label">Win rate global</div><div class="stat-value">${wr}%</div></div>
+    <div class="stat-card"><div class="stat-label">P&L cumulé</div><div class="stat-value" style="color:${pnlColor}">${totalPnl>0?'+':''}${totalPnl.toFixed(2)}</div></div>`;
+}
+
+function renderAccounts(accounts) {
+  const body = document.getElementById('accountsBody');
+  if (!accounts.length) {
+    body.innerHTML = `<div class="card"><p class="empty">Aucun compte n'a encore exécuté de signal.<br><span style="font-size:12px">Installez l'EA sur vos comptes avec le même secret — ils apparaîtront ici automatiquement.</span></p></div>`;
+    return;
+  }
+
+  body.innerHTML = accounts.map(a => {
+    const pnlColor = a.totalPnl > 0 ? 'var(--green)' : a.totalPnl < 0 ? 'var(--red)' : 'var(--muted)';
+    const name = a.label || ('Compte ' + a.accountId);
+    const pf = a.profitFactor >= 999 ? '∞' : a.profitFactor;
+    return `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px">
+            ${name}
+            ${a.platform ? `<span class="chip" style="font-size:10px">${a.platform.toUpperCase()}</span>` : ''}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">ID: ${a.accountId} · ${a.lastActivity ? 'actif ' + fmtDate(a.lastActivity) : ''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:20px;font-weight:800;font-family:monospace;color:${pnlColor}">${a.totalPnl>0?'+':''}${a.totalPnl.toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--muted)">P&L total</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700">${a.closedTrades}</div><div style="font-size:10px;color:var(--muted)">Fermés</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:var(--green)">${a.wins}</div><div style="font-size:10px;color:var(--muted)">Gagnés</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:var(--red)">${a.losses}</div><div style="font-size:10px;color:var(--muted)">Perdus</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700">${a.winRate}%</div><div style="font-size:10px;color:var(--muted)">Réussite</div></div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <span style="font-size:12px;color:var(--muted)">Profit factor: <b style="color:var(--text)">${pf}</b> · ${a.openTrades} ouvert(s)</span>
+        <button class="btn btn-secondary btn-sm" onclick="toggleAccountTrades('${a.accountId}', this)">Détails ▾</button>
+      </div>
+      <div id="acc-trades-${a.accountId}" style="display:none;margin-top:10px"></div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleAccountTrades(accountId, btn) {
+  const box = document.getElementById('acc-trades-' + accountId);
+  if (box.style.display === 'block') {
+    box.style.display = 'none';
+    btn.textContent = 'Détails ▾';
+    return;
+  }
+  btn.textContent = 'Masquer ▴';
+  box.style.display = 'block';
+  box.innerHTML = '<p class="empty" style="font-size:12px">Chargement…</p>';
+  try {
+    const data = await api('/api/account-stats?account=' + encodeURIComponent(accountId));
+    const acc = (data.accounts || [])[0];
+    const trades = (acc && acc.trades) ? acc.trades.slice().reverse() : [];
+    if (!trades.length) { box.innerHTML = '<p class="empty" style="font-size:12px">Aucun trade</p>'; return; }
+    box.innerHTML = `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="color:var(--muted);text-align:left">
+          <th style="padding:4px">Date</th><th>Sym.</th><th>Sens</th><th>Statut</th><th style="text-align:right">P&L</th>
+        </tr></thead>
+        <tbody>${trades.map(t => `
+          <tr style="border-top:1px solid var(--border)">
+            <td style="padding:5px 4px;color:var(--muted)">${fmtDate(t.closedAt || t.createdAt)}</td>
+            <td style="font-weight:600">${t.symbol || '—'}</td>
+            <td>${t.action ? `<span class="chip ${t.action.toLowerCase()}">${t.action}</span>` : '—'}</td>
+            <td>${t.result ? `<span class="chip ${t.result}">${rLabel(t.result)}</span>` : `<span class="chip ${t.status}">${t.status}</span>`}</td>
+            <td style="text-align:right;font-family:monospace;color:${t.profit>0?'var(--green)':t.profit<0?'var(--red)':'var(--muted)'}">${t.profit!=null?(t.profit>0?'+':'')+Number(t.profit).toFixed(2):'—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) {
+    box.innerHTML = `<p class="empty" style="font-size:12px">Erreur: ${e.message}</p>`;
+  }
 }
 
 // ============================================================
