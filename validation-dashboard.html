@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Station X - Validation des Signaux</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 2px solid #00d4ff;
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            color: #00d4ff;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        .status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 2px solid #00d4ff;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 12px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+        }
+
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #b0b0b0;
+            font-weight: 500;
+        }
+
+        textarea, input {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            resize: vertical;
+            transition: all 0.3s;
+        }
+
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        textarea {
+            min-height: 120px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.95em;
+        }
+
+        .btn-parse {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: white;
+        }
+
+        .btn-parse:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
+        }
+
+        .btn-execute {
+            background: linear-gradient(135deg, #00ff88, #00cc66);
+            color: #000;
+            font-weight: 700;
+        }
+
+        .btn-execute:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 255, 136, 0.4);
+        }
+
+        .btn-execute:disabled {
+            background: #555;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .btn-reject {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            color: white;
+        }
+
+        .btn-reject:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255, 68, 68, 0.4);
+        }
+
+        .signal-preview {
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 4px solid #00d4ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+
+        .signal-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+        }
+
+        .signal-item:last-child {
+            border-bottom: none;
+        }
+
+        .signal-label {
+            color: #b0b0b0;
+            font-weight: 500;
+        }
+
+        .signal-value {
+            color: #00d4ff;
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+        }
+
+        .validation-result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .validation-result.show {
+            display: block;
+        }
+
+        .validation-result.success {
+            background: rgba(0, 255, 136, 0.1);
+            border: 1px solid #00ff88;
+            color: #00ff88;
+        }
+
+        .validation-result.error {
+            background: rgba(255, 68, 68, 0.1);
+            border: 1px solid #ff4444;
+            color: #ff6666;
+        }
+
+        .validation-result.warning {
+            background: rgba(255, 200, 0, 0.1);
+            border: 1px solid #ffc800;
+            color: #ffc800;
+        }
+
+        .validation-list {
+            list-style: none;
+            margin-top: 10px;
+        }
+
+        .validation-list li {
+            padding: 6px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .validation-list li:before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        .error .validation-list li:before {
+            content: '✗';
+        }
+
+        .format-guide {
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        .format-guide h3 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+
+        .format-example {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-family: 'Courier New', monospace;
+            color: #00ff88;
+        }
+
+        .station-x-format {
+            color: #ff9000;
+        }
+
+        .your-format {
+            color: #00d4ff;
+        }
+
+        .execution-log {
+            max-height: 300px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 6px;
+            padding: 15px;
+            font-size: 0.85em;
+            font-family: 'Courier New', monospace;
+        }
+
+        .log-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+            display: flex;
+            gap: 10px;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-time {
+            color: #999;
+            min-width: 60px;
+        }
+
+        .log-success {
+            color: #00ff88;
+        }
+
+        .log-error {
+            color: #ff6666;
+        }
+
+        .log-info {
+            color: #00d4ff;
+        }
+
+        .risk-reward-meter {
+            margin-top: 15px;
+        }
+
+        .meter-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+
+        .meter-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        .meter-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444, #ffaa00, #00ff88);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .risk-text {
+            font-size: 0.85em;
+            color: #b0b0b0;
+            margin-top: 5px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 60px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 212, 255, 0.2);
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .footer-link {
+            color: #00d4ff;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .footer-link:hover {
+            text-decoration: underline;
+            text-shadow: 0 0 5px rgba(0, 212, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Station X Signal Validator</h1>
+            <div class="status">✓ Connexion Vercel Active</div>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Column: Input -->
+            <div class="card">
+                <h2>📝 Copie le signal de Station X</h2>
+
+                <div class="input-group">
+                    <label>Colle ici le message Station X:</label>
+                    <textarea id="stationXInput" placeholder="Exemple:
+🔴 JE VENDS XAUUSD à 4024.5
+🎯 TP1 : 4025
+🎯 TP2 : 4018
+🎯 TP3 : Ouvert
+🔒 SL : 4031"></textarea>
+                </div>
+
+                <button class="btn-parse" onclick="parseStationX()">📊 Analyser le signal</button>
+
+                <div class="format-guide">
+                    <h3>📋 Format accepté:</h3>
+                    <div class="format-example station-x-format">
+                        🔴 JE VENDS XAUUSD à 4024.5<br>
+                        🎯 TP1 : 4025<br>
+                        🔒 SL : 4031
+                    </div>
+                    <div style="margin-top: 10px; border-top: 1px solid rgba(0,212,255,0.2); padding-top: 10px;">
+                        <strong>Ou format direct:</strong>
+                        <div class="format-example your-format">
+                            SELL XAUUSD 4024.5 SL:4031 TP:4025 VOL:1.0
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Preview & Actions -->
+            <div class="card">
+                <h2>✓ Validation & Exécution</h2>
+
+                <div id="parsedSignal" style="display: none;">
+                    <div class="signal-preview">
+                        <div class="signal-item">
+                            <span class="signal-label">Action</span>
+                            <span class="signal-value" id="preview-action">-</span>
+                        </div>
+                        <div class="signal-item">
+                            <span class="signal-label">Symbole</span>
+                            <span class="signal-value" id="preview-symbol">-</span>
+                        </div>
+                        <div class="signal-item">
+                            <span class="signal-label">Entrée</span>
+                            <span class="signal-value" id="preview-entry">-</span>
+                        </div>
+                        <div class="signal-item">
+                            <span class="signal-label">Stop Loss</span>
+                            <span class="signal-value" id="preview-sl">-</span>
+                        </div>
+                        <div class="signal-item">
+                            <span class="signal-label">Take Profit</span>
+                            <span class="signal-value" id="preview-tp">-</span>
+                        </div>
+                        <div class="signal-item">
+                            <span class="signal-label">Volume</span>
+                            <span class="signal-value" id="preview-volume">-</span>
+                        </div>
+
+                        <div class="risk-reward-meter">
+                            <div class="meter-label">
+                                <span>Risk/Reward Ratio</span>
+                                <span id="rr-ratio">0:0</span>
+                            </div>
+                            <div class="meter-bar">
+                                <div class="meter-fill" id="rr-meter"></div>
+                            </div>
+                            <div class="risk-text" id="risk-text">Calcul en cours...</div>
+                        </div>
+                    </div>
+
+                    <div id="validationResult" class="validation-result"></div>
+
+                    <div class="button-group">
+                        <button class="btn-execute" id="executeBtn" onclick="executeSignal()" disabled>✓ EXÉCUTER</button>
+                        <button class="btn-reject" onclick="rejectSignal()">✗ ANNULER</button>
+                    </div>
+                </div>
+
+                <div id="noSignal" style="text-align: center; color: #888; padding: 40px 20px;">
+                    <p>👆 Colle un signal pour commencer</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Execution Log -->
+        <div class="card">
+            <h2>📊 Journal d'exécution</h2>
+            <div class="execution-log" id="executionLog">
+                <div class="log-entry">
+                    <span class="log-time">[00:00]</span>
+                    <span class="log-info">Dashboard chargé - Prêt à recevoir les signaux</span>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>
+                Station X Signal Validator v1.0 | 
+                <a href="https://github.com/Iyessiha/telegram-mt5-trader" class="footer-link">GitHub</a> | 
+                <a href="https://monweinfinity.com" class="footer-link">MonWe Infinity LLC</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        const VERCEL_URL = 'https://your-app.vercel.app'; // À remplacer par ton URL Vercel
+        const TELEGRAM_SECRET = 'your_secret'; // À remplacer
+
+        let currentSignal = null;
+
+        function addLog(message, type = 'info') {
+            const log = document.getElementById('executionLog');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            const time = new Date().toLocaleTimeString('fr-FR', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            entry.innerHTML = `<span class="log-time">[${time}]</span><span>${message}</span>`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function parseStationX() {
+            const input = document.getElementById('stationXInput').value.trim();
+            
+            if (!input) {
+                alert('Veuillez coller un signal');
+                return;
+            }
+
+            try {
+                // Try to parse Station X format
+                let signal = parseStationXFormat(input);
+                
+                // If failed, try direct format
+                if (!signal) {
+                    signal = parseDirectFormat(input);
+                }
+
+                if (!signal) {
+                    showValidation('error', 'Format non reconnu. Utilisez le format Station X ou direct.', []);
+                    addLog('❌ Parsing échoué - Format invalide', 'error');
+                    return;
+                }
+
+                currentSignal = signal;
+                displaySignalPreview(signal);
+                validateSignal(signal);
+                addLog(`✓ Signal parsé: ${signal.action} ${signal.symbol} @ ${signal.entry}`, 'success');
+
+            } catch (error) {
+                showValidation('error', error.message, []);
+                addLog(`❌ Erreur: ${error.message}`, 'error');
+            }
+        }
+
+        function parseStationXFormat(text) {
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+            
+            // Look for pattern: JE VENDS/ACHETE SYMBOL à PRICE
+            const actionLine = lines.find(l => 
+                l.match(/^(🔴|🟢)?\s*JE\s+(VENDS|ACHÈTE?)\s+(\w+)\s+[àa]\s+([\d.]+)/i)
+            );
+            
+            if (!actionLine) return null;
+
+            const match = actionLine.match(/JE\s+(VENDS|ACHÈTE?)\s+(\w+)\s+[àa]\s+([\d.]+)/i);
+            const action = match[1].toUpperCase().startsWith('V') ? 'SELL' : 'BUY';
+            const symbol = match[2];
+            const entry = parseFloat(match[3]);
+
+            // Find TP (take first one)
+            const tpLine = lines.find(l => l.match(/TP\s*1?\s*:\s*([\d.]+)/i));
+            const tp = tpLine ? parseFloat(tpLine.match(/([\d.]+)/)[1]) : null;
+
+            // Find SL
+            const slLine = lines.find(l => l.match(/SL\s*:\s*([\d.]+)/i));
+            const sl = slLine ? parseFloat(slLine.match(/([\d.]+)/)[1]) : null;
+
+            if (!symbol || !entry || !tp || !sl) {
+                throw new Error('Signal incomplet: manque ACTION, SYMBOL, ENTRY, SL ou TP');
+            }
+
+            return {
+                action,
+                symbol: symbol.toUpperCase(),
+                entry,
+                stopLoss: sl,
+                takeProfit: tp,
+                volume: 1.0,
+                raw: text
+            };
+        }
+
+        function parseDirectFormat(text) {
+            // BUY/SELL SYMBOL ENTRY SL:VALUE TP:VALUE [VOL:VALUE]
+            const regex = /^(BUY|SELL)\s+(\w+)\s+([\d.]+)\s+SL:([\d.]+)\s+TP:([\d.]+)(?:\s+VOL:([\d.]+))?/i;
+            const match = text.trim().match(regex);
+
+            if (!match) return null;
+
+            return {
+                action: match[1].toUpperCase(),
+                symbol: match[2].toUpperCase(),
+                entry: parseFloat(match[3]),
+                stopLoss: parseFloat(match[4]),
+                takeProfit: parseFloat(match[5]),
+                volume: match[6] ? parseFloat(match[6]) : 1.0,
+                raw: text
+            };
+        }
+
+        function displaySignalPreview(signal) {
+            document.getElementById('noSignal').style.display = 'none';
+            document.getElementById('parsedSignal').style.display = 'block';
+
+            document.getElementById('preview-action').textContent = signal.action;
+            document.getElementById('preview-symbol').textContent = signal.symbol;
+            document.getElementById('preview-entry').textContent = signal.entry.toFixed(5);
+            document.getElementById('preview-sl').textContent = signal.stopLoss.toFixed(5);
+            document.getElementById('preview-tp').textContent = signal.takeProfit.toFixed(5);
+            document.getElementById('preview-volume').textContent = signal.volume.toFixed(2);
+
+            // Calculate risk/reward
+            const risk = Math.abs(signal.entry - signal.stopLoss);
+            const reward = Math.abs(signal.takeProfit - signal.entry);
+            const ratio = reward / risk;
+
+            document.getElementById('rr-ratio').textContent = ratio.toFixed(2) + ':1';
+            document.getElementById('rr-meter').style.width = Math.min(ratio * 20, 100) + '%';
+            
+            const riskText = ratio >= 2 ? '✓ Bon ratio' : ratio >= 1 ? '⚠ Acceptable' : '✗ Faible';
+            document.getElementById('risk-text').textContent = `Risque: ${risk.toFixed(5)} | Récompense: ${reward.toFixed(5)} - ${riskText}`;
+        }
+
+        function validateSignal(signal) {
+            const errors = [];
+            const warnings = [];
+
+            // Validation rules
+            if (!['BUY', 'SELL'].includes(signal.action)) {
+                errors.push('Action invalide (doit être BUY ou SELL)');
+            }
+
+            if (!['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'].includes(signal.symbol)) {
+                warnings.push(`Symbole ${signal.symbol} non dans la liste recommandée`);
+            }
+
+            if (signal.entry <= 0) {
+                errors.push('Prix d\'entrée invalide');
+            }
+
+            if (signal.stopLoss === signal.entry) {
+                errors.push('Stop Loss ne peut pas être au même prix que l\'entrée');
+            }
+
+            if (signal.takeProfit === signal.entry) {
+                errors.push('Take Profit ne peut pas être au même prix que l\'entrée');
+            }
+
+            // BUY validation
+            if (signal.action === 'BUY') {
+                if (signal.takeProfit <= signal.entry) {
+                    errors.push('Pour un BUY: Take Profit doit être AU DESSUS de l\'entrée');
+                }
+                if (signal.stopLoss >= signal.entry) {
+                    errors.push('Pour un BUY: Stop Loss doit être EN DESSOUS de l\'entrée');
+                }
+            }
+
+            // SELL validation
+            if (signal.action === 'SELL') {
+                if (signal.takeProfit >= signal.entry) {
+                    errors.push('Pour un SELL: Take Profit doit être EN DESSOUS de l\'entrée');
+                }
+                if (signal.stopLoss <= signal.entry) {
+                    errors.push('Pour un SELL: Stop Loss doit être AU DESSUS de l\'entrée');
+                }
+            }
+
+            // Risk/Reward
+            const risk = Math.abs(signal.entry - signal.stopLoss);
+            const reward = Math.abs(signal.takeProfit - signal.entry);
+            if (reward < risk) {
+                warnings.push(`Risk/Reward faible: ${(reward/risk).toFixed(2)}:1 (minimum 1:1)`);
+            }
+
+            if (signal.volume <= 0 || signal.volume > 10) {
+                errors.push(`Volume invalide: ${signal.volume} (doit être entre 0.01 et 10)`);
+            }
+
+            // Display validation
+            if (errors.length > 0) {
+                showValidation('error', 'Erreurs de validation:', errors);
+                document.getElementById('executeBtn').disabled = true;
+                addLog('❌ Validation échouée - ' + errors[0], 'error');
+            } else if (warnings.length > 0) {
+                showValidation('warning', 'Avertissements:', warnings);
+                document.getElementById('executeBtn').disabled = false;
+                addLog('⚠ Validation avec avertissements', 'info');
+            } else {
+                showValidation('success', 'Signal validé ✓', ['Tous les paramètres sont corrects']);
+                document.getElementById('executeBtn').disabled = false;
+                addLog('✓ Signal valide et prêt à exécuter', 'success');
+            }
+        }
+
+        function showValidation(type, message, items) {
+            const result = document.getElementById('validationResult');
+            result.className = `validation-result show ${type}`;
+            
+            let html = `<strong>${message}</strong>`;
+            if (items.length > 0) {
+                html += '<ul class="validation-list">';
+                items.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            result.innerHTML = html;
+        }
+
+        async function executeSignal() {
+            if (!currentSignal) return;
+
+            const btn = document.getElementById('executeBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Exécution...';
+
+            try {
+                const response = await fetch(`${VERCEL_URL}/api/telegram-webhook`, {
+                    method: 'POST',
+                    headers: {
+                        'x-telegram-secret': TELEGRAM_SECRET,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: formatSignalForBot(currentSignal),
+                        user_id: 'manual-validation'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    addLog(`✓ Signal exécuté! Ordre ID: ${data.signal.orderId || 'pending'}`, 'success');
+                    showValidation('success', 'Signal exécuté avec succès!', [
+                        `Ordre ID: ${data.signal.orderId || 'En attente'}`,
+                        `${currentSignal.action} ${currentSignal.volume} ${currentSignal.symbol}`,
+                        `Entrée: ${currentSignal.entry} | SL: ${currentSignal.stopLoss} | TP: ${currentSignal.takeProfit}`
+                    ]);
+                    
+                    // Clear input
+                    setTimeout(() => {
+                        document.getElementById('stationXInput').value = '';
+                        document.getElementById('parsedSignal').style.display = 'none';
+                        document.getElementById('noSignal').style.display = 'block';
+                        btn.textContent = '✓ EXÉCUTER';
+                        currentSignal = null;
+                    }, 2000);
+                } else {
+                    const error = data.error || 'Erreur inconnue';
+                    addLog(`❌ Erreur: ${error}`, 'error');
+                    showValidation('error', 'Erreur lors de l\'exécution:', [error]);
+                    btn.disabled = false;
+                    btn.textContent = '✓ EXÉCUTER';
+                }
+            } catch (error) {
+                addLog(`❌ Erreur réseau: ${error.message}`, 'error');
+                showValidation('error', 'Erreur de connexion:', [error.message]);
+                btn.disabled = false;
+                btn.textContent = '✓ EXÉCUTER';
+            }
+        }
+
+        function formatSignalForBot(signal) {
+            return `${signal.action} ${signal.symbol} ${signal.entry} SL:${signal.stopLoss} TP:${signal.takeProfit} VOL:${signal.volume}`;
+        }
+
+        function rejectSignal() {
+            document.getElementById('stationXInput').value = '';
+            document.getElementById('parsedSignal').style.display = 'none';
+            document.getElementById('noSignal').style.display = 'block';
+            document.getElementById('validationResult').className = 'validation-result';
+            currentSignal = null;
+            addLog('Annulation du signal', 'info');
+        }
+
+        // Enter key to parse
+        document.getElementById('stationXInput')?.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                parseStationX();
+            }
+        });
+    </script>
+</body>
+</html>
