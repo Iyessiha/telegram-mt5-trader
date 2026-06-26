@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { TradeSignal, MT5Response } from '@/types/index';
+import { TradeSignal, MT5Response } from '../types/index';
 
 /**
  * Send signal to MT5 server

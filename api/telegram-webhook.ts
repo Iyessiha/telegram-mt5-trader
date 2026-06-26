@@ -1,9 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { parseSignal } from '@/lib/telegram';
-import { validateSignal } from '@/lib/validation';
-import { sendToMT5 } from '@/lib/mt5';
-import { supabase } from '@/lib/supabase';
-import { sendTelegramAlert, formatSignalExecuted } from '@/lib/telegram-notify';
+import { parseSignal } from '../lib/telegram';
+import { validateSignal } from '../lib/validation';
+import { sendToMT5 } from '../lib/mt5';
+import { supabase } from '../lib/supabase';
+import { sendTelegramAlert, formatSignalExecuted } from '../lib/telegram-notify';
 
 const TELEGRAM_SECRET = process.env.TELEGRAM_SECRET || '';
 

@@ -15,9 +15,9 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey);
 export async function ensureTablesExist() {
   try {
     // Check if table exists
-    const { data, error } = await supabase
-      .from('trading_signals')
-      .select('id')
+    const { error } = await supabase
+      .from("trading_signals")
+      .select("id")
       .limit(0);
 
     if (error && error.code === 'PGRST116') {

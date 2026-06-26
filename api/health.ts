@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabase } from '@/lib/supabase';
-import { testMT5Connection } from '@/lib/mt5';
+import { supabase } from '../lib/supabase';
+import { testMT5Connection } from '../lib/mt5';
 
 /**
  * GET /api/health
@@ -26,7 +26,7 @@ export default async function handler(
 
     // Test Supabase connection
     try {
-      const { count, error } = await supabase
+      const { error } = await supabase
         .from('trading_signals')
         .select('*', { count: 'exact' })
         .limit(1);

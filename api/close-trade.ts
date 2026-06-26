@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabase } from '@/lib/supabase';
-import { sendTelegramAlert, formatTradeResult } from '@/lib/telegram-notify';
+import { supabase } from '../lib/supabase';
+import { sendTelegramAlert, formatTradeResult } from '../lib/telegram-notify';
 
 function cors(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

@@ -1,9 +1,8 @@
-import { TradeSignal, ValidationResult } from '@/types/index';
+import { TradeSignal, ValidationResult } from '../types/index';
 
 const ALLOWED_SYMBOLS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF'];
 const MAX_VOLUME = 10;
 const MIN_VOLUME = 0.01;
-const MAX_DAILY_TRADES = 50;
 
 export function validateSignal(signal: TradeSignal): ValidationResult {
   try {

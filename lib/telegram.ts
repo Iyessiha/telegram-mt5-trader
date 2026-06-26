@@ -1,4 +1,4 @@
-import { TradeSignal } from '@/types/index';
+import { TradeSignal } from '../types/index';
 
 /**
  * Parse Telegram message into trade signal

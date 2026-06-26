@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { sendTelegramAlert, formatTestAlert, formatDailySummary } from '@/lib/telegram-notify';
-import { supabase } from '@/lib/supabase';
+import { sendTelegramAlert, formatTestAlert, formatDailySummary } from '../lib/telegram-notify';
+import { supabase } from '../lib/supabase';
 
 const TELEGRAM_SECRET = process.env.TELEGRAM_SECRET || '';
 
