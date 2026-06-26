@@ -18,7 +18,7 @@ input int     InpSlippage    = 30;                  // Slippage max (points)
 input int     InpMagic       = 20260626;            // Magic number
 input string  InpSymbolPrefix = "";                 // Préfixe symbole broker (souvent vide)
 input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (Exness = "c")
-input string  InpAllowedSymbols = "XAUUSD,BTCUSD";  // Symboles autorisés (vide = tous). Ex: XAUUSD,BTCUSD
+input string  InpAllowedSymbols = "";               // Symboles autorisés (vide = TOUS). Ex: XAUUSD,BTCUSD
 input bool    InpVerbose     = true;                // Journaux détaillés
 
 //+------------------------------------------------------------------+
