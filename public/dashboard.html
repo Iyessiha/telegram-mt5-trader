@@ -751,54 +751,64 @@ function parseStructured(text) {
   const lines = text.split('\n').map(l => l.trim());
   const joined = text.toUpperCase();
 
-  // 1) Entrée (accepte une fourchette "4082-4085" -> milieu)
-  const entLine = lines.find(l => /(ENTR[ÉE]E?|ENTRY)\s*[:\-]?\s*[\d]/i.test(l));
-  if (!entLine) return null;
-  const entNums = (entLine.match(/(\d+(?:[.,]\d+)?)/g) || []).map(n => parseFloat(n.replace(',', '.')));
-  if (entNums.length === 0) return null;
-  // si fourchette (2 premiers nombres proches), prendre le milieu
-  let entry;
-  if (entNums.length >= 2 && Math.abs(entNums[0] - entNums[1]) / entNums[0] < 0.02) {
-    entry = (entNums[0] + entNums[1]) / 2;
-  } else {
-    entry = entNums[0];
+  // Helper: extrait les nombres d'une ligne en gérant les espaces internes ("4 060" -> 4060)
+  // On retire les espaces ENTRE chiffres, puis on lit les nombres.
+  function numsOf(line) {
+    const cleaned = line.replace(/(\d)[ \u00A0](?=\d)/g, '$1'); // "4 060" -> "4060"
+    return (cleaned.match(/\d+(?:[.,]\d+)?/g) || []).map(n => parseFloat(n.replace(',', '.')));
+  }
+  // valeur depuis une fourchette: milieu si 2 nombres proches, sinon le 1er
+  function pickFromRange(arr) {
+    if (!arr || arr.length === 0) return null;
+    if (arr.length >= 2 && Math.abs(arr[0] - arr[1]) / arr[0] < 0.05) return (arr[0] + arr[1]) / 2;
+    return arr[0];
   }
 
-  // 2) SL = INVALIDATION (ou SL/STOP)
+  // 1) Entrée (fourchette acceptée)
+  const entLine = lines.find(l => /(ENTR[ÉE]E?|ENTRY)\b/i.test(l) && /\d/.test(l));
+  if (!entLine) return null;
+  const entry = pickFromRange(numsOf(entLine));
+  if (!entry) return null;
+
+  // 2) SL = INVALIDATION (ou SL/STOP). Gère "Cassure sous 4 042"
   const slLine = lines.find(l => /(INVALIDATION|STOP|SL)\b/i.test(l) && /\d/.test(l));
   if (!slLine) return null;
-  const slNums = (slLine.match(/(\d+(?:[.,]\d+)?)/g) || []).map(n => parseFloat(n.replace(',', '.')));
-  if (slNums.length === 0) return null;
-  const sl = slNums[0];
+  const slArr = numsOf(slLine);
+  if (slArr.length === 0) return null;
+  const sl = slArr[0];
 
-  // 3) TP1, TP2, TP3... (prend le 1er nombre de chaque ligne TP)
-  const tpLines = lines.filter(l => /TP\s*\d*\s*[:\-]/i.test(l));
+  // 3) Cibles: accepte TP1/TP2/TP3 OU CIBLE COURT/MOYEN/LONG OU OBJECTIF/TARGET
+  const tpLines = lines.filter(l =>
+    /(TP\s*\d*|CIBLE|OBJECTIF|TARGET)\b/i.test(l) && /\d/.test(l)
+  );
   if (tpLines.length === 0) return null;
-  const takeProfits = tpLines.map(l => {
-    const m = l.match(/TP\s*\d*\s*[:\-]\s*(\d+(?:[.,]\d+)?)/i);
-    return m ? parseFloat(m[1].replace(',', '.')) : null;
-  }).filter(v => v && v > 0);
+  const takeProfits = tpLines
+    .map(l => pickFromRange(numsOf(l)))
+    .filter(v => v && v > 0);
   if (takeProfits.length === 0) return null;
 
-  // 4) Sens déduit: si les TP sont au-dessus de l'entrée -> BUY, sinon SELL
-  const avgTp = takeProfits.reduce((a, b) => a + b, 0) / takeProfits.length;
-  const action = avgTp > entry ? 'BUY' : 'SELL';
-
-  // 5) Symbole: chercher un ticker connu, sinon défaut (réglage ou XAUUSD)
-  const known = ['XAUUSD','BTCUSD','XAGUSD','EURUSD','GBPUSD','USDJPY','ETHUSD','US30','NAS100','GER40'];
-  let symbol = known.find(k => joined.includes(k)) || null;
-  if (!symbol) {
-    symbol = (window.CFG && CFG.defaultSymbol && CFG.defaultSymbol()) || 'XAUUSD';
+  // 4) Sens: priorité à une ligne DIRECTION explicite, sinon déduit
+  let action = null;
+  const dirLine = lines.find(l => /DIRECTION|SENS|BIAIS/i.test(l));
+  if (dirLine) {
+    if (/HAUSS|ACHAT|ACHÈTE|BUY|LONG|BULL/i.test(dirLine)) action = 'BUY';
+    else if (/BAISS|VENT|VENDS|SELL|SHORT|BEAR/i.test(dirLine)) action = 'SELL';
+  }
+  if (!action) {
+    const avgTp = takeProfits.reduce((a, b) => a + b, 0) / takeProfits.length;
+    action = avgTp > entry ? 'BUY' : 'SELL';
   }
 
-  // Cohérence: SL du bon côté (sinon on corrige le sens)
-  // BUY -> SL sous l'entrée ; SELL -> SL au-dessus
-  let act = action;
-  if (act === 'BUY' && sl > entry) act = 'SELL';
-  if (act === 'SELL' && sl < entry) act = 'BUY';
+  // 5) Symbole: ticker connu sinon défaut XAUUSD
+  const known = ['XAUUSD','BTCUSD','XAGUSD','EURUSD','GBPUSD','USDJPY','ETHUSD','US30','NAS100','GER40'];
+  let symbol = known.find(k => joined.includes(k)) || 'XAUUSD';
+
+  // Cohérence finale: SL du bon côté (corrige le sens si contradiction nette)
+  if (sl < entry && action === 'SELL' && takeProfits.every(t => t > entry)) action = 'BUY';
+  if (sl > entry && action === 'BUY'  && takeProfits.every(t => t < entry)) action = 'SELL';
 
   return {
-    action: act,
+    action,
     symbol,
     entry: parseFloat(entry.toFixed(3)),
     stopLoss: sl,
