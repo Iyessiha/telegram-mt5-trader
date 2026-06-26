@@ -268,3 +268,68 @@ void ConfirmExecution(string sigId, ulong ticket)
    }
 }
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Détection automatique des fermetures de position                |
+//| Se déclenche quand une position se ferme (TP, SL ou manuel)     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest&     request,
+                        const MqlTradeResult&      result)
+{
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+
+   ulong dealTicket = trans.deal;
+   if(dealTicket <= 0) return;
+   if(!HistoryDealSelect(dealTicket)) return;
+
+   // Uniquement les sorties de position (clôtures)
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT) return;
+
+   // Uniquement nos trades (magic number)
+   long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   if(magic != InpMagic) return;
+
+   ulong  posId  = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+   double price  = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   double swap   = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+   double comm   = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+   double net    = profit + swap + comm;
+
+   ReportClose(posId, price, net);
+}
+
+//+------------------------------------------------------------------+
+//| Envoie la fermeture à l'API (POST /api/ea-close)                |
+//+------------------------------------------------------------------+
+void ReportClose(ulong ticket, double closePrice, double profit)
+{
+   string url = InpApiUrl + "/api/ea-close";
+   string json = "{\"key\":\"" + InpSecret + "\""
+               + ",\"account\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\""
+               + ",\"ticket\":" + IntegerToString((long)ticket)
+               + ",\"close_price\":" + DoubleToString(closePrice, 5)
+               + ",\"profit\":" + DoubleToString(profit, 2) + "}";
+
+   char   post[];
+   char   res[];
+   string resHeaders;
+   StringToCharArray(json, post, 0, StringLen(json));
+   ArrayResize(post, StringLen(json));
+
+   string headers = "Content-Type: application/json\r\n";
+
+   ResetLastError();
+   int code = WebRequest("POST", url, headers, 5000, post, res, resHeaders);
+   if(code == 200)
+   {
+      if(InpVerbose) PrintFormat("✓ Fermeture signalée: ticket #%d profit %.2f", ticket, profit);
+   }
+   else
+   {
+      Print("⚠ Report fermeture échoué (code ", code, ", err ", GetLastError(), ")");
+   }
+}
+//+------------------------------------------------------------------+

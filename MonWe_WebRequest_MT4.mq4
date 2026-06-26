@@ -46,6 +46,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    PollSignals();
+   CheckClosedTrades();
 }
 
 //+------------------------------------------------------------------+
@@ -257,6 +258,89 @@ void ConfirmExecution(string sigId, int ticket)
    else
    {
       Print("⚠ Confirmation échouée (code ", code, ", err ", GetLastError(), ")");
+   }
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Détection automatique des fermetures (MT4 = polling)            |
+//| Garde la liste des tickets ouverts ; si un ticket disparaît     |
+//| des positions ouvertes, on le cherche dans l'historique.        |
+//+------------------------------------------------------------------+
+int    g_openTickets[];   // tickets actuellement ouverts (gérés par cet EA)
+
+void CheckClosedTrades()
+{
+   // 1) Construire la liste des tickets ouverts MAINTENANT (par magic)
+   int current[];
+   int cnt = 0;
+   for(int i = 0; i < OrdersTotal(); i++)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() != InpMagic) continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
+      ArrayResize(current, cnt + 1);
+      current[cnt] = OrderTicket();
+      cnt++;
+   }
+
+   // 2) Pour chaque ticket connu précédemment mais absent maintenant -> fermé
+   int prevN = ArraySize(g_openTickets);
+   for(int p = 0; p < prevN; p++)
+   {
+      int t = g_openTickets[p];
+      bool stillOpen = false;
+      for(int c = 0; c < cnt; c++)
+         if(current[c] == t) { stillOpen = true; break; }
+
+      if(!stillOpen)
+      {
+         // Retrouver l'ordre fermé dans l'historique
+         if(OrderSelect(t, SELECT_BY_TICKET, MODE_HISTORY))
+         {
+            if(OrderMagicNumber() == InpMagic && OrderCloseTime() > 0)
+            {
+               double net = OrderProfit() + OrderSwap() + OrderCommission();
+               ReportClose(t, OrderClosePrice(), net);
+            }
+         }
+      }
+   }
+
+   // 3) Mémoriser la liste courante pour le prochain tick
+   ArrayResize(g_openTickets, cnt);
+   for(int k = 0; k < cnt; k++) g_openTickets[k] = current[k];
+}
+
+//+------------------------------------------------------------------+
+//| Envoie la fermeture à l'API (POST /api/ea-close)                |
+//+------------------------------------------------------------------+
+void ReportClose(int ticket, double closePrice, double profit)
+{
+   string url = InpApiUrl + "/api/ea-close";
+   string json = "{\"key\":\"" + InpSecret + "\""
+               + ",\"account\":\"" + IntegerToString(AccountNumber()) + "\""
+               + ",\"ticket\":" + IntegerToString(ticket)
+               + ",\"close_price\":" + DoubleToString(closePrice, 5)
+               + ",\"profit\":" + DoubleToString(profit, 2) + "}";
+
+   char   post[];
+   char   res[];
+   string resHeaders;
+   int len = StringToCharArray(json, post, 0, StringLen(json));
+   ArrayResize(post, len - 1);
+
+   string headers = "Content-Type: application/json\r\n";
+
+   ResetLastError();
+   int code = WebRequest("POST", url, headers, 5000, post, res, resHeaders);
+   if(code == 200)
+   {
+      if(InpVerbose) Print("✓ Fermeture signalée: ticket #", ticket, " profit ", DoubleToString(profit, 2));
+   }
+   else
+   {
+      Print("⚠ Report fermeture échoué (code ", code, ", err ", GetLastError(), ")");
    }
 }
 //+------------------------------------------------------------------+
