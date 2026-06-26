@@ -206,18 +206,69 @@ void ProcessSignal(string line)
    if(!SymbolSelect(symbol, true))
    {
       Print("❌ Symbole introuvable: ", symbol);
+      ConfirmExecution(sigId, 0);
       return;
+   }
+
+   // --- Normalisation et validation des stops (évite l'erreur 10016) ---
+   int    digits   = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   double point    = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   long   stopsLvl = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long   freezeLvl= SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double minDist  = (double)(MathMax(stopsLvl, freezeLvl)) * point;
+   if(minDist <= 0) minDist = 10 * point;  // marge de sécurité si broker renvoie 0
+
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   double mktPrice = (action == "BUY") ? ask : bid;
+
+   sl = NormalizeDouble(sl, digits);
+   tp = NormalizeDouble(tp, digits);
+
+   // Vérifier la cohérence du sens ET la distance minimale, par rapport au PRIX RÉEL
+   bool stopsValid = true;
+   string why = "";
+
+   if(action == "BUY")
+   {
+      // BUY: SL en dessous, TP au dessus du prix marché
+      if(sl > 0 && sl >= mktPrice)              { stopsValid=false; why="SL BUY au-dessus du prix"; }
+      if(tp > 0 && tp <= mktPrice)              { stopsValid=false; why="TP BUY en-dessous du prix"; }
+      if(sl > 0 && (mktPrice - sl) < minDist)   { stopsValid=false; why="SL trop proche"; }
+      if(tp > 0 && (tp - mktPrice) < minDist)   { stopsValid=false; why="TP trop proche"; }
+   }
+   else // SELL
+   {
+      // SELL: SL au dessus, TP en dessous du prix marché
+      if(sl > 0 && sl <= mktPrice)              { stopsValid=false; why="SL SELL en-dessous du prix"; }
+      if(tp > 0 && tp >= mktPrice)              { stopsValid=false; why="TP SELL au-dessus du prix"; }
+      if(sl > 0 && (sl - mktPrice) < minDist)   { stopsValid=false; why="SL trop proche"; }
+      if(tp > 0 && (mktPrice - tp) < minDist)   { stopsValid=false; why="TP trop proche"; }
+   }
+
+   // Si les stops sont invalides : ouvrir SANS SL/TP puis les poser ensuite (si possible)
+   bool deferStops = false;
+   if(!stopsValid)
+   {
+      Print("⚠ Stops invalides (", why, ") — prix marché ", DoubleToString(mktPrice, digits),
+            " | min dist ", DoubleToString(minDist, digits),
+            ". Ouverture sans SL/TP puis pose différée.");
+      deferStops = true;
    }
 
    // Exécuter au marché
    bool ok = false;
+   double useSl = deferStops ? 0.0 : sl;
+   double useTp = deferStops ? 0.0 : tp;
+
    if(action == "BUY")
-      ok = trade.Buy(volume, symbol, 0.0, sl, tp, "MonWe|" + sigId);
+      ok = trade.Buy(volume, symbol, 0.0, useSl, useTp, "MonWe|" + sigId);
    else if(action == "SELL")
-      ok = trade.Sell(volume, symbol, 0.0, sl, tp, "MonWe|" + sigId);
+      ok = trade.Sell(volume, symbol, 0.0, useSl, useTp, "MonWe|" + sigId);
    else
    {
       Print("❌ Action inconnue: ", action);
+      ConfirmExecution(sigId, 0);
       return;
    }
 
@@ -225,6 +276,41 @@ void ProcessSignal(string line)
    {
       ulong ticket = trade.ResultOrder();
       PrintFormat("✅ Exécuté: %s %s — Ticket #%d", action, symbol, ticket);
+
+      // Poser les stops après coup si on les avait différés (et qu'ils sont valides en valeur)
+      if(deferStops && (sl > 0 || tp > 0))
+      {
+         if(PositionSelectByTicket(ticket))
+         {
+            // Re-vérifier la distance avec le prix courant avant de poser
+            double curPrice = (action == "BUY") ? SymbolInfoDouble(symbol, SYMBOL_BID)
+                                                 : SymbolInfoDouble(symbol, SYMBOL_ASK);
+            double psl = sl, ptp = tp;
+            bool canSet = true;
+            if(action == "BUY")
+            {
+               if(psl > 0 && (curPrice - psl) < minDist) psl = 0;
+               if(ptp > 0 && (ptp - curPrice) < minDist) ptp = 0;
+            }
+            else
+            {
+               if(psl > 0 && (psl - curPrice) < minDist) psl = 0;
+               if(ptp > 0 && (curPrice - ptp) < minDist) ptp = 0;
+            }
+            if(psl > 0 || ptp > 0)
+            {
+               if(trade.PositionModify(ticket, psl, ptp))
+                  PrintFormat("  ↳ Stops posés: SL %.5f TP %.5f", psl, ptp);
+               else
+                  PrintFormat("  ↳ ⚠ Stops non posés (code %d) — position ouverte sans protection complète",
+                              trade.ResultRetcode());
+            }
+            else
+            {
+               Print("  ↳ ⚠ Stops toujours trop proches — position laissée sans SL/TP. Surveille manuellement.");
+            }
+         }
+      }
       ConfirmExecution(sigId, ticket);
    }
    else
