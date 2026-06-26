@@ -23,6 +23,15 @@ input string  InpSymbolSuffix = "c";                // Suffixe symbole broker (E
 input string  InpAllowedSymbols = "";               // Symboles autorisés (vide = TOUS). Ex: XAUUSD,BTCUSD
 input bool    InpVerbose     = true;                // Journaux détaillés
 
+//--- Gestion automatique du SL (Break-Even & Trailing)
+input bool    InpUseBreakEven = true;               // Activer le Break-Even auto
+input double  InpBE_TriggerPips = 100;              // BE: profit (en points) avant de bouger le SL
+input double  InpBE_LockPips    = 10;               // BE: points de profit verrouillés (SL = entrée + X)
+input bool    InpUseTrailing   = true;              // Activer le Trailing Stop auto
+input double  InpTrail_StartPips = 150;             // Trailing: profit (points) avant de démarrer
+input double  InpTrail_DistPips  = 100;             // Trailing: distance du SL au prix (points)
+input double  InpTrail_StepPips  = 20;              // Trailing: pas minimum de déplacement (points)
+
 //--- Variables globales
 datetime g_lastPoll = 0;
 
@@ -56,6 +65,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    PollSignals();
+   ManageOpenPositions();   // Break-Even + Trailing Stop auto
 }
 
 //+------------------------------------------------------------------+
@@ -354,6 +364,105 @@ void ConfirmExecution(string sigId, ulong ticket)
    }
 }
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Gestion auto des positions ouvertes : Break-Even + Trailing      |
+//| Appelée à chaque tick du timer. Ne touche que nos positions.     |
+//+------------------------------------------------------------------+
+void ManageOpenPositions()
+{
+   if(!InpUseBreakEven && !InpUseTrailing) return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+
+      // Uniquement nos positions (magic number)
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+
+      string sym   = PositionGetString(POSITION_SYMBOL);
+      long   type  = PositionGetInteger(POSITION_TYPE);
+      double open  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double curSL = PositionGetDouble(POSITION_SL);
+      double curTP = PositionGetDouble(POSITION_TP);
+
+      int    digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      double point  = SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(point <= 0) continue;
+      long   stopsLvl = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      double minDist  = (double)stopsLvl * point;
+      if(minDist <= 0) minDist = 10 * point;
+
+      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+
+      // Prix "courant" du point de vue de la clôture de la position
+      double curPrice = (type == POSITION_TYPE_BUY) ? bid : ask;
+
+      // Profit actuel en points (positif si en gain)
+      double profitPts = (type == POSITION_TYPE_BUY)
+                         ? (curPrice - open) / point
+                         : (open - curPrice) / point;
+
+      double newSL = curSL;  // on part du SL existant
+
+      // ---------- BREAK-EVEN ----------
+      if(InpUseBreakEven && profitPts >= InpBE_TriggerPips)
+      {
+         double beSL = (type == POSITION_TYPE_BUY)
+                       ? open + InpBE_LockPips * point
+                       : open - InpBE_LockPips * point;
+         beSL = NormalizeDouble(beSL, digits);
+
+         // N'avancer le SL que dans le bon sens (jamais reculer)
+         if(type == POSITION_TYPE_BUY)
+         { if(beSL > newSL || curSL == 0) newSL = beSL; }
+         else
+         { if(beSL < newSL || curSL == 0) newSL = beSL; }
+      }
+
+      // ---------- TRAILING STOP ----------
+      if(InpUseTrailing && profitPts >= InpTrail_StartPips)
+      {
+         double trailSL = (type == POSITION_TYPE_BUY)
+                          ? curPrice - InpTrail_DistPips * point
+                          : curPrice + InpTrail_DistPips * point;
+         trailSL = NormalizeDouble(trailSL, digits);
+
+         // Ne déplacer que si gain de InpTrail_StepPips minimum, et toujours dans le bon sens
+         if(type == POSITION_TYPE_BUY)
+         {
+            if(trailSL > newSL + InpTrail_StepPips * point || newSL == 0)
+               newSL = trailSL;
+         }
+         else
+         {
+            if(trailSL < newSL - InpTrail_StepPips * point || newSL == 0)
+               newSL = trailSL;
+         }
+      }
+
+      // ---------- APPLIQUER si changement valide ----------
+      if(newSL != curSL && newSL > 0)
+      {
+         // Respecter la distance minimale du broker
+         bool distOk = (type == POSITION_TYPE_BUY)
+                       ? (curPrice - newSL) >= minDist
+                       : (newSL - curPrice) >= minDist;
+         if(distOk)
+         {
+            if(trade.PositionModify(ticket, newSL, curTP))
+            {
+               if(InpVerbose)
+                  PrintFormat("🔧 SL ajusté #%d %s: %.5f → %.5f (profit %.0f pts)",
+                              ticket, sym, curSL, newSL, profitPts);
+            }
+         }
+      }
+   }
+}
 
 //+------------------------------------------------------------------+
 //| Détection automatique des fermetures de position                |
