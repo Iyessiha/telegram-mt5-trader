@@ -1,60 +1,61 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabase } from '../lib/supabase';
-import { testMT5Connection } from '../lib/mt5';
+import { supabaseConfigured, getSupabase } from '../lib/supabase';
+
+function cors(res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,x-telegram-secret');
+}
 
 /**
  * GET /api/health
- * Check system health and connection status
+ * Vérifie l'état du système — ne plante jamais, renvoie toujours un JSON.
  */
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse
-) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  cors(res);
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
-  try {
-    const health = {
-      timestamp: new Date().toISOString(),
-      status: 'OK',
-      services: {
-        supabase: 'unknown',
-        mt5: 'unknown'
+  const health: any = {
+    timestamp: new Date().toISOString(),
+    status: 'OK',
+    env: {
+      TELEGRAM_BOT_TOKEN:        process.env.TELEGRAM_BOT_TOKEN ? 'OK' : 'MANQUANTE',
+      TELEGRAM_SECRET:           process.env.TELEGRAM_SECRET ? 'OK' : 'MANQUANTE',
+      TELEGRAM_CHAT_ID:          process.env.TELEGRAM_CHAT_ID ? 'OK' : 'MANQUANTE',
+      NEXT_PUBLIC_SUPABASE_URL:  process.env.NEXT_PUBLIC_SUPABASE_URL ? 'OK' : 'MANQUANTE',
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'OK' : 'MANQUANTE'
+    },
+    services: { supabase: 'unknown' }
+  };
+
+  // Test Supabase
+  const cfg = supabaseConfigured();
+  if (!cfg.ok) {
+    health.services.supabase = 'NON_CONFIGURÉ';
+    health.supabaseMissing = cfg.missing;
+  } else {
+    try {
+      const sb = getSupabase();
+      const { error } = await sb.from('trading_signals').select('id').limit(1);
+      if (error) {
+        health.services.supabase = 'ERREUR';
+        health.supabaseError = error.message;
+        if (error.message.includes('does not exist') || error.code === 'PGRST205') {
+          health.hint = "La table 'trading_signals' n'existe pas — lance supabase-migration.sql";
+        }
+      } else {
+        health.services.supabase = 'OK';
       }
-    };
-
-    // Test Supabase connection
-    try {
-      const { error } = await supabase
-        .from('trading_signals')
-        .select('*', { count: 'exact' })
-        .limit(1);
-
-      health.services.supabase = error ? 'ERROR' : 'OK';
-    } catch (error) {
-      health.services.supabase = 'ERROR';
+    } catch (e) {
+      health.services.supabase = 'ERREUR';
+      health.supabaseError = e instanceof Error ? e.message : 'Inconnue';
     }
-
-    // Test MT5 connection
-    try {
-      const mt5Ok = await testMT5Connection();
-      health.services.mt5 = mt5Ok ? 'OK' : 'UNREACHABLE';
-    } catch (error) {
-      health.services.mt5 = 'ERROR';
-    }
-
-    // Overall status
-    const allOk = Object.values(health.services).every(s => s === 'OK');
-    health.status = allOk ? 'OK' : 'DEGRADED';
-
-    return res.status(allOk ? 200 : 503).json(health);
-
-  } catch (error) {
-    console.error('Health check error:', error);
-    return res.status(500).json({ 
-      error: 'Health check failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
+
+  // Statut global
+  const allEnvOk = Object.values(health.env).every(v => v === 'OK');
+  const supaOk = health.services.supabase === 'OK';
+  health.status = (allEnvOk && supaOk) ? 'OK' : 'DÉGRADÉ';
+
+  return res.status(200).json(health);
 }
