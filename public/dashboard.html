@@ -313,12 +313,19 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <button class="btn btn-primary" onclick="parseAndShow()">🔍 Analyser</button>
       </div>
       <div class="divider"></div>
-      <div class="section-title">Format accepté</div>
-      <div style="font-family:monospace;font-size:12px;color:#7fa8cc;background:#0d1422;padding:10px;border-radius:6px;line-height:1.8">
-        🔴 JE VENDS XAUUSD à 4024.5<br>🎯 TP1 : 4025<br>🔒 SL : 4031<br><br>
-        <span style="color:var(--muted)">— ou —</span><br><br>
-        SELL XAUUSD 4024.5 SL:4031 TP:4025 VOL:1.0
-      </div>
+      <details style="font-size:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-weight:600;user-select:none">ⓘ Formats de signaux acceptés (4)</summary>
+        <div style="font-family:monospace;font-size:11px;color:#7fa8cc;background:#0d1422;padding:10px;border-radius:6px;line-height:1.7;margin-top:8px">
+          <b style="color:var(--accent)">1. Station X</b><br>
+          🔴 JE VENDS XAUUSD à 4024.5 / 🎯 TP1: 4025 / 🔒 SL: 4031<br><br>
+          <b style="color:var(--accent)">2. Entrée / Invalidation / TP</b><br>
+          ENTRÉE: 4082-4085 / INVALIDATION: 4078 / TP1: 4100<br><br>
+          <b style="color:var(--accent)">3. Direction / Cible</b><br>
+          DIRECTION: HAUSSIER / ENTRÉE: 4 060-4 075 / CIBLE COURT: 4 120<br><br>
+          <b style="color:var(--accent)">4. Direct</b><br>
+          SELL XAUUSD 4024.5 SL:4031 TP:4025 VOL:1.0
+        </div>
+      </details>
     </div>
     <div class="card">
       <div class="card-title">✅ Validation & Exécution</div>
