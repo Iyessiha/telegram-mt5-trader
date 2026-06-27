@@ -46,6 +46,28 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nav-btn{padding:12px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;transition:all .2s;display:flex;align-items:center;gap:6px}
 .nav-btn:hover{color:var(--text)}
 .nav-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:22px;line-height:1;cursor:pointer;padding:4px 8px;border-radius:8px}
+.nav-toggle:active{background:var(--border)}
+.nav-current{display:none;font-size:12px;color:var(--muted);font-weight:500}
+@media(max-width:700px){
+  .nav-toggle{display:block}
+  .nav-current{display:inline}
+  .brand-text{display:none}
+  .nav{
+    position:absolute;left:0;right:0;top:calc(52px + env(safe-area-inset-top));
+    flex-direction:column;padding:0;max-height:0;overflow:hidden;
+    transition:max-height .25s ease;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.4)
+  }
+  .nav.open{max-height:70vh;overflow-y:auto}
+  .nav-btn{
+    width:100%;justify-content:flex-start;padding:15px 20px;font-size:14px;
+    border-bottom:1px solid var(--border);border-left:3px solid transparent
+  }
+  .nav-btn.active{
+    border-bottom-color:var(--border);border-left-color:var(--accent);
+    background:rgba(0,212,255,.07)
+  }
+}
 
 /* ===== MAIN CONTENT ===== */
 .main{flex:1;overflow:hidden;position:relative}
@@ -249,8 +271,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <!-- HEADER -->
 <div class="header">
   <div class="logo">
+    <button class="nav-toggle" id="navToggle" onclick="toggleNav()" aria-label="Menu">☰</button>
     <div class="logo-icon">📈</div>
-    MonWe Trading
+    <span class="brand-text">MonWe Trading</span>
+    <span class="nav-current" id="navCurrent">Vue d'ensemble</span>
   </div>
   <div class="status-bar">
     <div class="status-dot" id="connStatus"><div class="dot" id="connDot"></div><span id="connLabel">...</span></div>
@@ -259,11 +283,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
 </div>
 
 <!-- NAV -->
-<div class="nav">
+<div class="nav" id="mainNav">
   <button class="nav-btn active" onclick="switchTab('overview')">📊 Vue d'ensemble</button>
   <button class="nav-btn" onclick="switchTab('signals')">📝 Signaux</button>
-  <button class="nav-btn" onclick="switchTab('performance')">📈 Performance</button>
   <button class="nav-btn" onclick="switchTab('accounts')">👥 Comptes</button>
+  <button class="nav-btn" onclick="switchTab('performance')">📈 Performance</button>
   <button class="nav-btn" onclick="switchTab('history')">📋 Historique</button>
   <button class="nav-btn" onclick="switchTab('alerts')">🔔 Alertes</button>
   <button class="nav-btn" onclick="switchTab('settings')">⚙️ Paramètres</button>
@@ -570,11 +594,23 @@ async function api(path, opts = {}) {
 // ============================================================
 // TABS
 // ============================================================
+function toggleNav() {
+  document.getElementById('mainNav').classList.toggle('open');
+}
+
 function switchTab(id) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + id).classList.add('active');
-  event.currentTarget.classList.add('active');
+  if (event && event.currentTarget) {
+    event.currentTarget.classList.add('active');
+    // Met à jour le nom de la section affiché sur mobile
+    const lbl = document.getElementById('navCurrent');
+    if (lbl) lbl.textContent = event.currentTarget.textContent.trim();
+  }
+  // Ferme le menu mobile après sélection
+  document.getElementById('mainNav').classList.remove('open');
+
   if (id === 'overview')     loadOverview();
   if (id === 'history')      loadHistory();
   if (id === 'performance')  loadPerformance();
@@ -1455,6 +1491,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   maybeLock();            // affiche l'écran de verrouillage si un code est défini
   updatePinStatus();
+  // Ferme le menu mobile si on touche en dehors
+  document.addEventListener('click', (e) => {
+    const nav = document.getElementById('mainNav');
+    const tog = document.getElementById('navToggle');
+    if (nav.classList.contains('open') && !nav.contains(e.target) && !tog.contains(e.target)) {
+      nav.classList.remove('open');
+    }
+  });
   loadSettingsUI();
   startClock();
   loadOverview();
