@@ -231,6 +231,21 @@ tr:hover td{background:rgba(255,255,255,.02)}
 </head>
 <body>
 
+<!-- LOCK SCREEN -->
+<div id="lockScreen" style="position:fixed;inset:0;z-index:9999;background:var(--bg,#0a0e17);display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="width:100%;max-width:340px;text-align:center">
+    <div style="font-size:48px;margin-bottom:8px">🔒</div>
+    <div style="font-size:20px;font-weight:800;color:var(--accent,#00d4ff);margin-bottom:4px">MonWe Trading</div>
+    <div style="font-size:13px;color:var(--muted,#64748b);margin-bottom:24px">Entrez votre code d'accès</div>
+    <input id="lockPin" type="password" inputmode="numeric" autocomplete="off"
+           placeholder="••••••"
+           style="width:100%;text-align:center;font-size:24px;letter-spacing:8px;padding:14px;border-radius:12px;border:1px solid var(--border,#1e293b);background:var(--card,#111827);color:var(--text,#e2e8f0);margin-bottom:12px"
+           onkeydown="if(event.key==='Enter')tryUnlock()">
+    <div id="lockErr" style="color:var(--red,#ff1744);font-size:13px;min-height:18px;margin-bottom:12px"></div>
+    <button onclick="tryUnlock()" style="width:100%;padding:14px;border:none;border-radius:12px;background:var(--accent,#00d4ff);color:#001018;font-weight:700;font-size:16px;cursor:pointer">Déverrouiller</button>
+  </div>
+</div>
+
 <!-- HEADER -->
 <div class="header">
   <div class="logo">
@@ -437,11 +452,24 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
   </div>
   <div class="card" style="margin-top:14px">
+    <div class="card-title">🔒 Sécurité — Code d'accès</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Protège l'ouverture du dashboard par un code. Recommandé sur un appareil partagé.</p>
+    <div id="pinStatus" style="font-size:13px;margin-bottom:10px"></div>
+    <div class="form-group"><label>Nouveau code (4-8 chiffres)</label><input type="password" inputmode="numeric" id="cfgPin" placeholder="••••" autocomplete="off"></div>
+    <div class="form-group"><label>Confirmer le code</label><input type="password" inputmode="numeric" id="cfgPin2" placeholder="••••" autocomplete="off"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary btn-sm" onclick="setPin()" style="flex:1">💾 Définir le code</button>
+      <button class="btn btn-secondary btn-sm" onclick="removePin()" style="flex:1">🗑 Retirer</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
     <div class="card-title">🛠 Actions</div>
     <div class="btn-row">
       <button class="btn btn-secondary btn-sm" onclick="checkHealth()">🔍 Tester la connexion</button>
       <button class="btn btn-warning btn-sm" onclick="sendAlert()">🔔 Tester alerte Telegram</button>
       <button class="btn btn-secondary btn-sm" onclick="exportCSV()">📤 Exporter CSV</button>
+      <button class="btn btn-secondary btn-sm" onclick="lockNow()">🔒 Verrouiller</button>
     </div>
   </div>
 </div>
@@ -1341,6 +1369,76 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 // INIT
 // ============================================================
+// ============================================================
+// SÉCURITÉ — Code d'accès (PIN)
+// ============================================================
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hasPin() { return !!localStorage.getItem('mw_pin_hash'); }
+
+async function maybeLock() {
+  if (!hasPin()) return;                       // pas de code défini → accès libre
+  if (sessionStorage.getItem('mw_unlocked') === '1') return;  // déjà déverrouillé cette session
+  const ls = document.getElementById('lockScreen');
+  ls.style.display = 'flex';
+  setTimeout(() => { const i = document.getElementById('lockPin'); if (i) i.focus(); }, 100);
+}
+
+async function tryUnlock() {
+  const pin = (document.getElementById('lockPin').value || '').trim();
+  const err = document.getElementById('lockErr');
+  if (!pin) { err.textContent = 'Entrez votre code'; return; }
+  const h = await sha256(pin);
+  if (h === localStorage.getItem('mw_pin_hash')) {
+    sessionStorage.setItem('mw_unlocked', '1');
+    document.getElementById('lockScreen').style.display = 'none';
+    document.getElementById('lockPin').value = '';
+    err.textContent = '';
+  } else {
+    err.textContent = '✗ Code incorrect';
+    document.getElementById('lockPin').value = '';
+  }
+}
+
+function lockNow() {
+  if (!hasPin()) { toast('Définissez d\'abord un code dans Paramètres', 'err'); return; }
+  sessionStorage.removeItem('mw_unlocked');
+  maybeLock();
+}
+
+async function setPin() {
+  const p1 = (document.getElementById('cfgPin').value || '').trim();
+  const p2 = (document.getElementById('cfgPin2').value || '').trim();
+  if (!/^\d{4,8}$/.test(p1)) { toast('Le code doit faire 4 à 8 chiffres', 'err'); return; }
+  if (p1 !== p2) { toast('Les deux codes ne correspondent pas', 'err'); return; }
+  localStorage.setItem('mw_pin_hash', await sha256(p1));
+  sessionStorage.setItem('mw_unlocked', '1');
+  document.getElementById('cfgPin').value = '';
+  document.getElementById('cfgPin2').value = '';
+  updatePinStatus();
+  toast('Code d\'accès défini ✓', 'ok');
+}
+
+function removePin() {
+  if (!hasPin()) { toast('Aucun code défini', 'err'); return; }
+  localStorage.removeItem('mw_pin_hash');
+  sessionStorage.removeItem('mw_unlocked');
+  updatePinStatus();
+  toast('Code d\'accès retiré', 'ok');
+}
+
+function updatePinStatus() {
+  const el = document.getElementById('pinStatus');
+  if (!el) return;
+  el.innerHTML = hasPin()
+    ? '<span style="color:var(--green)">✓ Code actif</span> — le dashboard est protégé à l\'ouverture.'
+    : '<span style="color:var(--muted)">Aucun code défini</span> — accès libre.';
+}
+
+
 document.addEventListener('DOMContentLoaded', () => {
   // Migration unique: réinitialise la liste de symboles vers le défaut élargi (crypto+indices)
   const SYM_VERSION = '2';
@@ -1348,6 +1446,8 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('mw_symbols');       // force le défaut élargi
     localStorage.setItem('mw_symbols_v', SYM_VERSION);
   }
+  maybeLock();            // affiche l'écran de verrouillage si un code est défini
+  updatePinStatus();
   loadSettingsUI();
   startClock();
   loadOverview();
