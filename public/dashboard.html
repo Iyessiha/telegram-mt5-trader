@@ -835,8 +835,8 @@ function parseStructured(text) {
     return arr[0];
   }
 
-  // 1) Entrée (fourchette acceptée)
-  const entLine = lines.find(l => /(ENTR[ÉE]E?|ENTRY)\b/i.test(l) && /\d/.test(l));
+  // 1) Entrée (fourchette acceptée). Accepte ENTRÉE/ENTRY ou Buy/Sell/Achat/Vente
+  const entLine = lines.find(l => /(ENTR[ÉE]E?|ENTRY|ENTRADA|BUY|SELL|ACHAT|VENTE)\s*[:\-]?\s*\d/i.test(l));
   if (!entLine) return null;
   const entry = pickFromRange(numsOf(entLine));
   if (!entry) return null;
@@ -854,16 +854,25 @@ function parseStructured(text) {
   );
   if (tpLines.length === 0) return null;
   const takeProfits = tpLines
-    .map(l => pickFromRange(numsOf(l)))
+    .map(l => {
+      // Retire l'étiquette "TP 1"/"TP2" pour ne pas confondre l'indice avec le prix
+      const stripped = l.replace(/TP\s*\d+/i, '');
+      return pickFromRange(numsOf(stripped));
+    })
     .filter(v => v && v > 0);
   if (takeProfits.length === 0) return null;
 
-  // 4) Sens: priorité à une ligne DIRECTION explicite, sinon déduit
+  // 4) Sens: 1) ligne DIRECTION  2) mot-clé Long/Short/Buy/Sell  3) déduit des TP
   let action = null;
   const dirLine = lines.find(l => /DIRECTION|SENS|BIAIS/i.test(l));
   if (dirLine) {
     if (/HAUSS|ACHAT|ACHÈTE|BUY|LONG|BULL/i.test(dirLine)) action = 'BUY';
     else if (/BAISS|VENT|VENDS|SELL|SHORT|BEAR/i.test(dirLine)) action = 'SELL';
+  }
+  if (!action) {
+    // mot-clé n'importe où dans le texte (ex: "LONG NAS100", "Buy : ...")
+    if (/\b(LONG|BUY|ACHAT|ACHÈTE|HAUSSIER)\b/i.test(joined)) action = 'BUY';
+    else if (/\b(SHORT|SELL|VENTE|VENDS|BAISSIER)\b/i.test(joined)) action = 'SELL';
   }
   if (!action) {
     const avgTp = takeProfits.reduce((a, b) => a + b, 0) / takeProfits.length;
