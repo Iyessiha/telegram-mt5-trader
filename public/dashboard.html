@@ -813,22 +813,53 @@ function parseAndShow() {
 
 function parseStationX(text) {
   const lines = text.split('\n').map(l => l.trim());
-  const aLine = lines.find(l => /JE\s+(VEND[S]?|ACHÈTE?)\s+(\w+)\s+[àa]\s+([\d.]+)/i.test(l));
+
+  // Normalise les nombres français : virgule décimale → point, espaces de milliers retirés
+  const norm = s => s.replace(/(\d)[ \u00A0](?=\d)/g, '$1').replace(/(\d),(\d)/g, '$1.$2');
+
+  // Cherche la ligne d'action :
+  //  - "JE VENDS/J'ACHÈTE XAUUSD à 4017" (Station X classique)
+  //  - "J'achète XAUUSD à 4017,65 - 4016,65" (apostrophe + virgule + fourchette)
+  const aLine = lines.find(l =>
+    /(?:J['\u2019]|JE\s+)(?:VEND[S]?|ACHÈTE?|ACHETÉ?|ACHET[EÉ]?)\s+\w+\s+[àa@]/i.test(l)
+  );
   if (!aLine) return null;
-  const aMatch = aLine.match(/JE\s+(VEND[S]?|ACHÈTE?)\s+(\w+)\s+[àa]\s+([\d.]+)/i);
+
+  const aMatch = aLine.match(/(?:J['\u2019]|JE\s+)(VEND[S]?|ACHÈTE?|ACHETÉ?|ACHET[EÉ]?)\s+(\w+)\s+[àa@]\s*(.*)/i);
+  if (!aMatch) return null;
+
   const action = aMatch[1].toUpperCase().startsWith('V') ? 'SELL' : 'BUY';
   const symbol = aMatch[2].toUpperCase();
-  const entry  = parseFloat(aMatch[3]);
-  // Collecter TOUS les TP (TP1, TP2, TP3...) — valeur après les deux-points
-  const tpLines = lines.filter(l => /TP\s*\d*\s*:\s*([\d.]+)/i.test(l));
-  const slLine  = lines.find(l => /SL\s*:\s*([\d.]+)/i.test(l));
-  if (tpLines.length === 0 || !slLine) return null;
-  const takeProfits = tpLines
-    .map(l => parseFloat(l.match(/TP\s*\d*\s*:\s*([\d.]+)/i)[1]))
-    .filter(v => v > 0);
+
+  // Entrée : peut être une fourchette "4017,65 - 4016,65" → milieu
+  const entryPart = norm(aMatch[3]);
+  const entryNums = (entryPart.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  if (entryNums.length === 0) return null;
+  let entry;
+  if (entryNums.length >= 2 && Math.abs(entryNums[0] - entryNums[1]) / entryNums[0] < 0.02) {
+    entry = (entryNums[0] + entryNums[1]) / 2;
+  } else {
+    entry = entryNums[0];
+  }
+
+  // TP : "TP1:", "TP 3 :", "✅ TP2:" — retire l'étiquette avant de lire le prix
+  const tpLines = lines.filter(l => /TP\s*\d*\s*:/i.test(l));
+  if (tpLines.length === 0) return null;
+  const takeProfits = tpLines.map(l => {
+    const stripped = norm(l.replace(/TP\s*\d+/i, ''));
+    const m = stripped.match(/:\s*(\d+(?:\.\d+)?)/);
+    return m ? parseFloat(m[1]) : null;
+  }).filter(v => v && v > 0);
   if (takeProfits.length === 0) return null;
-  const sl = parseFloat(slLine.match(/SL\s*:\s*([\d.]+)/i)[1]);
-  return { action, symbol, entry, stopLoss: sl, takeProfit: takeProfits[0], takeProfits, volume: 1.0 };
+
+  // SL : "SL: 4007,70"
+  const slLine = lines.find(l => /SL\s*:/i.test(l) && /\d/.test(l));
+  if (!slLine) return null;
+  const slNorm = norm(slLine).match(/\d+(?:\.\d+)?/g);
+  if (!slNorm) return null;
+  const sl = parseFloat(slNorm[0]);
+
+  return { action, symbol, entry: parseFloat(entry.toFixed(3)), stopLoss: sl, takeProfit: takeProfits[0], takeProfits, volume: 1.0 };
 }
 
 // Format structuré: ENTRÉE / INVALIDATION / TP1 / TP2 / TP3 (sens déduit)
@@ -836,11 +867,12 @@ function parseStructured(text) {
   const lines = text.split('\n').map(l => l.trim());
   const joined = text.toUpperCase();
 
-  // Helper: extrait les nombres d'une ligne en gérant les espaces internes ("4 060" -> 4060)
-  // On retire les espaces ENTRE chiffres, puis on lit les nombres.
+  // Helper: extrait les nombres d'une ligne en gérant espaces-milliers ET virgule décimale
   function numsOf(line) {
-    const cleaned = line.replace(/(\d)[ \u00A0](?=\d)/g, '$1'); // "4 060" -> "4060"
-    return (cleaned.match(/\d+(?:[.,]\d+)?/g) || []).map(n => parseFloat(n.replace(',', '.')));
+    const cleaned = line
+      .replace(/(\d)[ \u00A0](?=\d)/g, '$1')  // espaces de milliers : "4 060" → "4060"
+      .replace(/(\d),(\d)/g, '$1.$2');           // virgule décimale FR : "4017,65" → "4017.65"
+    return (cleaned.match(/\d+(?:\.\d+)?/g) || []).map(n => parseFloat(n));
   }
   // valeur depuis une fourchette: milieu si 2 nombres proches, sinon le 1er
   function pickFromRange(arr) {
