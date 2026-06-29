@@ -479,6 +479,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="form-group"><label>Volume par défaut (lots)</label><input type="number" id="cfgVol" value="1.0" step="0.01" min="0.01" max="10"></div>
       <div class="form-group"><label>Risk/Reward minimum</label><input type="number" id="cfgRR" value="1.0" step="0.1" min="0.5" max="10"></div>
       <div class="form-group"><label>Symboles autorisés</label><input type="text" id="cfgSymbols" placeholder="XAUUSD,EURUSD,GBPUSD,..."></div>
+      <div style="background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.15);border-radius:8px;padding:10px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px">⚡ Signaux rapides (ex: VENTE XAUUSD NOW)</div>
+        <div style="display:flex;gap:10px">
+          <div class="form-group" style="flex:1;margin:0"><label>SL par défaut (pips)</label><input type="number" id="cfgDefaultSL" value="0" step="1" min="0" placeholder="Ex: 50"></div>
+          <div class="form-group" style="flex:1;margin:0"><label>TP par défaut (pips)</label><input type="number" id="cfgDefaultTP" value="0" step="1" min="0" placeholder="Ex: 100"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">0 = ouverture sans SL/TP (non recommandé sur compte réel)</div>
+      </div>
       <button class="btn btn-secondary" onclick="resetSettings()" style="width:100%;margin-top:4px">🔄 Réinitialiser</button>
     </div>
   </div>
@@ -542,6 +550,8 @@ const CFG = {
   get chatId()  { return localStorage.getItem('mw_chatId')  || '' },
   get vol()     { return parseFloat(localStorage.getItem('mw_vol') || '1.0') },
   get minRR()   { return parseFloat(localStorage.getItem('mw_rr')  || '1.0') },
+  get defaultSL() { return parseFloat(localStorage.getItem('mw_default_sl') || '0') },
+  get defaultTP() { return parseFloat(localStorage.getItem('mw_default_tp') || '0') },
   get symbols() { return (localStorage.getItem('mw_symbols') || 'XAUUSD,BTCUSD,ETHUSD,XAGUSD,EURUSD,GBPUSD,USDJPY,AUDUSD,US30,US500,USTEC,NAS100,SPX500,GER40,UK100,FRA40,JP225,US2000').split(',') },
   base()        { return this.url || window.location.origin }
 };
@@ -553,6 +563,8 @@ function saveSettings() {
   localStorage.setItem('mw_vol',     document.getElementById('cfgVol').value);
   localStorage.setItem('mw_rr',      document.getElementById('cfgRR').value);
   localStorage.setItem('mw_symbols', document.getElementById('cfgSymbols').value.trim());
+  localStorage.setItem('mw_default_sl', document.getElementById('cfgDefaultSL').value);
+  localStorage.setItem('mw_default_tp', document.getElementById('cfgDefaultTP').value);
   toast('Paramètres sauvegardés ✓', 'ok');
 }
 
@@ -569,6 +581,8 @@ function loadSettingsUI() {
   document.getElementById('cfgVol').value     = CFG.vol;
   document.getElementById('cfgRR').value      = CFG.minRR;
   document.getElementById('cfgSymbols').value = CFG.symbols.join(',');
+  document.getElementById('cfgDefaultSL').value = CFG.defaultSL || 0;
+  document.getElementById('cfgDefaultTP').value = CFG.defaultTP || 0;
   document.getElementById('sigVolume').value  = CFG.vol;
 }
 
@@ -785,7 +799,7 @@ function parseAndShow() {
   const vol = parseFloat(document.getElementById('sigVolume').value) || CFG.vol;
   if (!raw) { toast('Collez un signal', 'err'); return; }
 
-  const sig = parseStationX(raw) || parseStructured(raw) || parseDirect(raw);
+  const sig = parseStationX(raw) || parseStructured(raw) || parseDirect(raw) || parseQuick(raw);
   if (!sig) {
     document.getElementById('noSig').innerHTML = '<div class="badge err">✗ Format non reconnu</div><p style="margin-top:8px;font-size:12px;color:var(--muted)">Utilisez le format Station X ou direct</p>';
     document.getElementById('noSig').style.display = 'block';
@@ -899,6 +913,33 @@ function parseStructured(text) {
   };
 }
 
+// Format rapide : "(VENTE|ACHAT|SELL|BUY|LONG|SHORT) SYMBOL [NOW|!]"
+// Sans niveaux — entrée au marché, SL/TP par défaut configurés dans Paramètres
+function parseQuick(text) {
+  const line = text.trim().split('\n')[0].trim();   // on lit uniquement la 1ère ligne
+  const m = line.match(/^(VENTE|ACHAT|SELL|BUY|LONG|SHORT)\s+([A-Z0-9]{3,10})(?:\s+.*)?$/i);
+  if (!m) return null;
+
+  const rawAction = m[1].toUpperCase();
+  const action = (rawAction === 'VENTE' || rawAction === 'SELL' || rawAction === 'SHORT') ? 'SELL' : 'BUY';
+  const symbol = m[2].toUpperCase();
+
+  // SL/TP par défaut depuis les Paramètres (en pips, 0 = pas de stop)
+  const slPips = CFG.defaultSL || 0;
+  const tpPips = CFG.defaultTP || 0;
+
+  return {
+    action,
+    symbol,
+    entry: 0,          // 0 = prix marché (l'EA exécute immédiatement)
+    stopLoss:  slPips,  // valeur en pips — l'EA les convertit en prix réel
+    takeProfit: tpPips,
+    takeProfits: tpPips ? [tpPips] : [],
+    volume: CFG.vol,
+    isQuick: true       // flag pour adapter la validation et l'affichage
+  };
+}
+
 function parseDirect(text) {
   const m = text.trim().match(/^(BUY|SELL)\s+(\w+)\s+([\d.]+)\s+SL:([\d.]+)\s+TP:([\d.]+)(?:\s+VOL:([\d.]+))?/i);
   if (!m) return null;
@@ -912,18 +953,23 @@ function showPreview(sig) {
   document.getElementById('pv-action').textContent = sig.action;
   document.getElementById('pv-action').className = 'sig-val ' + sig.action.toLowerCase();
   document.getElementById('pv-symbol').textContent = sig.symbol;
-  document.getElementById('pv-entry').textContent  = sig.entry;
-  document.getElementById('pv-sl').textContent     = sig.stopLoss;
-  document.getElementById('pv-tp').textContent     = (sig.takeProfits && sig.takeProfits.length ? sig.takeProfits : [sig.takeProfit]).join(' / ');
+  document.getElementById('pv-entry').textContent  = sig.isQuick ? 'MARCHÉ (now)' : sig.entry;
+  document.getElementById('pv-sl').textContent     = sig.isQuick && !sig.stopLoss  ? '—' : sig.stopLoss;
+  document.getElementById('pv-tp').textContent     = sig.isQuick && !sig.takeProfit ? '—' : (sig.takeProfits && sig.takeProfits.length ? sig.takeProfits : [sig.takeProfit]).join(' / ');
   document.getElementById('pv-vol').textContent    = sig.volume;
 
-  const risk   = Math.abs(sig.entry - sig.stopLoss);
-  const tps    = (sig.takeProfits && sig.takeProfits.length) ? sig.takeProfits : [sig.takeProfit];
-  const farTp  = tps.reduce((far, tp) => Math.abs(tp - sig.entry) > Math.abs(far - sig.entry) ? tp : far, tps[0]);
-  const reward = Math.abs(farTp - sig.entry);
-  const rr     = risk > 0 ? (reward / risk) : 0;
-  document.getElementById('pv-rr').textContent = rr.toFixed(2) + ':1';
-  document.getElementById('rrFill').style.width = Math.min(rr * 25, 100) + '%';
+  if (sig.isQuick) {
+    document.getElementById('pv-rr').textContent = '—';
+    document.getElementById('rrFill').style.width = '0%';
+  } else {
+    const risk   = Math.abs(sig.entry - sig.stopLoss);
+    const tps    = (sig.takeProfits && sig.takeProfits.length) ? sig.takeProfits : [sig.takeProfit];
+    const farTp  = tps.reduce((far, tp) => Math.abs(tp - sig.entry) > Math.abs(far - sig.entry) ? tp : far, tps[0]);
+    const reward = Math.abs(farTp - sig.entry);
+    const rr     = risk > 0 ? (reward / risk) : 0;
+    document.getElementById('pv-rr').textContent = rr.toFixed(2) + ':1';
+    document.getElementById('rrFill').style.width = Math.min(rr * 25, 100) + '%';
+  }
 
   const v = validateSig(sig);
   const badge = document.getElementById('valBadge');
@@ -943,6 +989,16 @@ function validateSig(s) {
   const errors = [], warns = [];
   if (!['BUY','SELL'].includes(s.action)) errors.push('Action invalide');
   if (!CFG.symbols.includes(s.symbol)) warns.push(`${s.symbol} non dans la liste recommandée`);
+
+  // Signal rapide : validation allégée
+  if (s.isQuick) {
+    if (!s.stopLoss)  warns.push('⚡ Signal rapide — SL non défini (configurer dans Paramètres)');
+    if (!s.takeProfit) warns.push('⚡ Signal rapide — TP non défini (configurer dans Paramètres)');
+    if (s.volume > 10) errors.push('Volume > 10 lots');
+    return { errors, warns };
+  }
+
+  // Signal normal : validation complète
   if (s.stopLoss === s.entry) errors.push('SL = Entrée');
   if (s.takeProfit === s.entry) errors.push('TP = Entrée');
   if (s.action === 'BUY') {

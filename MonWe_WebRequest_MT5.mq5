@@ -328,6 +328,18 @@ void ProcessSignal(string line)
    tp = NormalizeDouble(tp, digits);
    entry = NormalizeDouble(entry, digits);
 
+   // ---- SIGNAL RAPIDE: entry=0 → convertir SL/TP de pips en prix réel ----
+   if(entry == 0.0)
+   {
+      entry = mktPrice;
+      if(sl > 0) sl = (action == "BUY") ? entry - sl*point : entry + sl*point;
+      if(tp > 0) tp = (action == "BUY") ? entry + tp*point : entry - tp*point;
+      sl = NormalizeDouble(sl, digits);
+      tp = NormalizeDouble(tp, digits);
+      if(InpVerbose)
+         PrintFormat("⚡ Signal rapide %s %s @ %.5f | SL %.5f | TP %.5f", action, symbol, entry, sl, tp);
+   }
+
    // ============================================================
    // DÉCISION: ordre au MARCHÉ ou EN ATTENTE (limite/stop) ?
    // ============================================================

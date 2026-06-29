@@ -38,6 +38,11 @@ export function validateSignal(signal: TradeSignal): ValidationResult {
     }
 
     // Check entry price is positive
+    // Exception: entry=0 = signal rapide (exécution au prix marché)
+    const isQuick = signal.entry === 0;
+    if (isQuick) {
+      return { ok: true };   // SL/TP sont en pips, l'EA les calcule — pas de validation de niveaux
+    }
     if (signal.entry <= 0) {
       return { ok: false, error: 'Entry price must be positive' };
     }
